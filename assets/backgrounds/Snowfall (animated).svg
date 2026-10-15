@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" data-frames="150" data-ms="40">
+<defs><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#93c5fd"/><stop offset="1" stop-color="#e0f2fe"/></linearGradient></defs>
+<rect width="1920" height="1080" fill="url(#s)"/>
+<path d="M0 820 Q480 740 960 800 Q1440 860 1920 780 L1920 1080 L0 1080 Z" fill="#f8fafc"/>
+<g fill="#fff"><circle cx="{{osc 100 140}}" cy="{{loop 0 -20 1100}}" r="8"/><circle cx="{{osc 360 320}}" cy="{{loop 0.25 -20 1100}}" r="6"/><circle cx="{{osc 620 660}}" cy="{{loop 0.5 -20 1100}}" r="9"/><circle cx="{{osc 880 840}}" cy="{{loop 0.75 -20 1100}}" r="7"/><circle cx="{{osc 1140 1180}}" cy="{{loop 0.1 -20 1100}}" r="8"/><circle cx="{{osc 1400 1360}}" cy="{{loop 0.35 -20 1100}}" r="6"/><circle cx="{{osc 1660 1700}}" cy="{{loop 0.6 -20 1100}}" r="9"/><circle cx="{{osc 1860 1820}}" cy="{{loop 0.85 -20 1100}}" r="7"/><circle cx="{{osc 240 280}}" cy="{{loop 0.65 -20 1100}}" r="5"/><circle cx="{{osc 760 720}}" cy="{{loop 0.05 -20 1100}}" r="5"/><circle cx="{{osc 1280 1320}}" cy="{{loop 0.9 -20 1100}}" r="5"/><circle cx="{{osc 1540 1500}}" cy="{{loop 0.45 -20 1100}}" r="5"/></g>
+</svg>

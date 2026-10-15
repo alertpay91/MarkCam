@@ -1,0 +1,15 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.65 -0.75 3.3 1.5" data-face="true">
+  <defs>
+    <linearGradient id="lens" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b4a63" stop-opacity="0.95"/><stop offset="1" stop-color="#0b0f17" stop-opacity="0.95"/>
+    </linearGradient>
+  </defs>
+  <path d="M-1.55 -0.22 L-1.62 0.05" stroke="#111" stroke-width="0.09" stroke-linecap="round"/>
+  <path d="M1.55 -0.22 L1.62 0.05" stroke="#111" stroke-width="0.09" stroke-linecap="round"/>
+  <path d="M-1.2 -0.33 Q-0.62 -0.42 -0.12 -0.3 Q-0.08 0.25 -0.45 0.5 Q-0.95 0.62 -1.18 0.25 Q-1.3 0 -1.2 -0.33 Z" fill="url(#lens)" stroke="#0d0d10" stroke-width="0.08"/>
+  <path d="M1.2 -0.33 Q0.62 -0.42 0.12 -0.3 Q0.08 0.25 0.45 0.5 Q0.95 0.62 1.18 0.25 Q1.3 0 1.2 -0.33 Z" fill="url(#lens)" stroke="#0d0d10" stroke-width="0.08"/>
+  <path d="M-0.14 -0.24 Q0 -0.32 0.14 -0.24" stroke="#0d0d10" stroke-width="0.08" fill="none"/>
+  <path d="M-1.2 -0.33 L-1.58 -0.22 M1.2 -0.33 L1.58 -0.22" stroke="#0d0d10" stroke-width="0.09" stroke-linecap="round"/>
+  <path d="M-0.95 -0.2 L-0.55 -0.24" stroke="#fff" stroke-opacity="0.45" stroke-width="0.05" stroke-linecap="round"/>
+  <path d="M0.35 -0.24 L0.75 -0.2" stroke="#fff" stroke-opacity="0.45" stroke-width="0.05" stroke-linecap="round"/>
+</svg>

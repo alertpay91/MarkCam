@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.75 -1.85 3.5 1.0" data-face="true">
+  <path d="M-1.55 -1.12 Q0 -1.62 1.55 -1.12" stroke="#4f9a3b" stroke-width="0.07" fill="none"/>
+  <g fill="#5fb04a"><ellipse cx="-1.2" cy="-1.32" rx="0.16" ry="0.07" transform="rotate(-30 -1.2 -1.32)"/><ellipse cx="-0.4" cy="-1.55" rx="0.16" ry="0.07" transform="rotate(20 -0.4 -1.55)"/><ellipse cx="0.4" cy="-1.55" rx="0.16" ry="0.07" transform="rotate(-20 0.4 -1.55)"/><ellipse cx="1.2" cy="-1.32" rx="0.16" ry="0.07" transform="rotate(30 1.2 -1.32)"/></g>
+  <g id="f"><g fill="#ff7eb3"><circle cx="0" cy="-1.68" r="0.13"/><circle cx="0.13" cy="-1.55" r="0.13"/><circle cx="-0.13" cy="-1.55" r="0.13"/><circle cx="0.08" cy="-1.42" r="0.13"/><circle cx="-0.08" cy="-1.42" r="0.13"/></g><circle cx="0" cy="-1.54" r="0.08" fill="#ffd23f"/></g>
+  <use href="#f" transform="translate(-0.78 0.12) scale(0.9)" /><use href="#f" transform="translate(0.78 0.12)"/>
+  <g transform="translate(-1.35 0.4)"><g fill="#fff3a6"><circle cx="0" cy="-1.68" r="0.11"/><circle cx="0.11" cy="-1.57" r="0.11"/><circle cx="-0.11" cy="-1.57" r="0.11"/><circle cx="0" cy="-1.46" r="0.11"/></g><circle cx="0" cy="-1.57" r="0.07" fill="#ff9f1c"/></g>
+  <g transform="translate(1.35 0.4)"><g fill="#a78bfa"><circle cx="0" cy="-1.68" r="0.11"/><circle cx="0.11" cy="-1.57" r="0.11"/><circle cx="-0.11" cy="-1.57" r="0.11"/><circle cx="0" cy="-1.46" r="0.11"/></g><circle cx="0" cy="-1.57" r="0.07" fill="#ffd23f"/></g>
+</svg>

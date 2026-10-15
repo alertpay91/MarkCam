@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.4 -3.3 2.8 2.2" data-face="true" data-frames="34" data-ms="33">
+  <g stroke="#3be05a" stroke-width="0.07" fill="none" stroke-linecap="round"><path d="M-0.35 -1.2 Q-0.6 -2.0 {{osc -0.95 -0.75}} -2.75"/><path d="M0.35 -1.2 Q0.6 -2.0 {{osc 0.75 0.95}} -2.75"/></g>
+  <circle cx="{{osc -0.95 -0.75}}" cy="-2.85" r="0.2" fill="#9dff6a" stroke="#3be05a" stroke-width="0.04"/>
+  <circle cx="{{osc 0.75 0.95}}" cy="-2.85" r="0.2" fill="#9dff6a" stroke="#3be05a" stroke-width="0.04"/>
+</svg>

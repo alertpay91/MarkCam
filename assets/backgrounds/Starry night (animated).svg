@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" data-frames="120" data-ms="40">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#020617"/><stop offset="1" stop-color="#1e1b4b"/></linearGradient></defs>
+<rect width="1920" height="1080" fill="url(#sky)"/>
+<g fill="#fff"><circle cx="120" cy="90" r="{{ph 0 1 3}}"/><circle cx="300" cy="200" r="{{ph 0.3 1 3}}"/><circle cx="520" cy="80" r="{{ph 0.6 1 3}}"/><circle cx="760" cy="160" r="{{ph 0.1 1 3}}"/><circle cx="980" cy="60" r="{{ph 0.45 1 3}}"/><circle cx="1180" cy="210" r="{{ph 0.8 1 3}}"/><circle cx="1400" cy="100" r="{{ph 0.2 1 3}}"/><circle cx="1620" cy="180" r="{{ph 0.55 1 3}}"/><circle cx="1840" cy="70" r="{{ph 0.9 1 3}}"/><circle cx="210" cy="420" r="{{ph 0.35 1 3}}"/><circle cx="430" cy="530" r="{{ph 0.7 1 3}}"/><circle cx="870" cy="440" r="{{ph 0.15 1 3}}"/><circle cx="1090" cy="560" r="{{ph 0.5 1 3}}"/><circle cx="1320" cy="470" r="{{ph 0.85 1 3}}"/><circle cx="1780" cy="520" r="{{ph 0.25 1 3}}"/><circle cx="640" cy="300" r="{{ph 0.65 1 3}}"/><circle cx="1560" cy="350" r="{{ph 0.05 1 3}}"/></g>
+<circle cx="{{lin -100 2100}}" cy="{{lin 120 420}}" r="4" fill="#fff"/><path d="M{{lin -100 2100}} {{lin 120 420}} L{{lin -260 1940}} {{lin 98 398}}" stroke="#fff" stroke-width="3" opacity="0.5"/>
+<path d="M0 900 Q480 820 960 880 Q1440 940 1920 860 L1920 1080 L0 1080 Z" fill="#0b1026"/><circle cx="1600" cy="200" r="80" fill="#fef9c3"/>
+</svg>

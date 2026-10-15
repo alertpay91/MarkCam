@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" data-frames="36" data-ms="33">
+<g transform="translate(50 50)" stroke-linecap="round" stroke-width="3" opacity="{{lin 1.4 0}}">
+<g stroke="#ff4d8d"><path d="M0 {{lin -4 -40}} L0 {{lin -2 -30}}"/><path d="M0 {{lin 4 40}} L0 {{lin 2 30}}"/><path d="M{{lin -4 -40}} 0 L{{lin -2 -30}} 0"/><path d="M{{lin 4 40}} 0 L{{lin 2 30}} 0"/></g>
+<g stroke="#ffd23f"><path d="M{{lin -3 -28}} {{lin -3 -28}} L{{lin -1 -21}} {{lin -1 -21}}"/><path d="M{{lin 3 28}} {{lin -3 -28}} L{{lin 1 21}} {{lin -1 -21}}"/><path d="M{{lin -3 -28}} {{lin 3 28}} L{{lin -1 -21}} {{lin 1 21}}"/><path d="M{{lin 3 28}} {{lin 3 28}} L{{lin 1 21}} {{lin 1 21}}"/></g>
+</g><circle cx="50" cy="50" r="{{lin 6 0}}" fill="#fff"/></svg>

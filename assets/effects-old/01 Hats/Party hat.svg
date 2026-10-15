@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.6 -4.1 3.2 3.1" data-face="true">
+  <defs><clipPath id="c"><path d="M0.05 -3.75 L1.05 -1.15 Q0 -0.95 -0.95 -1.15 Z"/></clipPath></defs>
+  <g transform="rotate(12 0 -1.15)">
+    <path d="M0.05 -3.75 L1.05 -1.15 Q0 -0.95 -0.95 -1.15 Z" fill="#2fa8ff"/>
+    <g clip-path="url(#c)" fill="#ffd23f">
+      <path d="M-1.2 -1.5 L1.3 -2.2 L1.3 -1.9 L-1.2 -1.2 Z"/><path d="M-1.2 -2.3 L1.3 -3.0 L1.3 -2.7 L-1.2 -2.0 Z"/><path d="M-1.2 -3.1 L1.3 -3.8 L1.3 -3.5 L-1.2 -2.8 Z"/>
+    </g>
+    <g fill="#ff4d8d"><circle cx="-0.3" cy="-1.75" r="0.09"/><circle cx="0.4" cy="-2.45" r="0.08"/><circle cx="-0.05" cy="-3.05" r="0.07"/><circle cx="0.55" cy="-1.55" r="0.08"/></g>
+    <path d="M-1.0 -1.12 Q0 -0.9 1.1 -1.12 Q1.12 -0.98 1.0 -0.92 Q0 -0.72 -0.95 -0.92 Q-1.08 -1.0 -1.0 -1.12 Z" fill="#ff4d8d"/>
+    <circle cx="0.05" cy="-3.78" r="0.26" fill="#ffd23f"/><circle cx="-0.05" cy="-3.86" r="0.12" fill="#ffe98a"/>
+  </g>
+</svg>

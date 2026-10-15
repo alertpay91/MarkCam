@@ -1,0 +1,55 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ovc-core",
+    "crates/ovc-gpu",
+    "crates/ovc-effects",
+    "crates/ovc-ml",
+    "crates/ovc-capture",
+    "crates/ovc-mcam",
+    "crates/ovc-ipc",
+    "crates/ovc-vcam",
+    "crates/ovc-cli",
+    "crates/ovc-app",
+    "plugins/windows-dshow",
+]
+
+[workspace.package]
+version = "1.3.1"
+edition = "2021"
+license = "GPL-3.0-or-later"
+rust-version = "1.78"
+repository = "https://github.com/your-org/openvcam"
+authors = ["OpenVCam contributors"]
+
+[workspace.dependencies]
+# internal
+ovc-core = { path = "crates/ovc-core" }
+ovc-gpu = { path = "crates/ovc-gpu" }
+ovc-effects = { path = "crates/ovc-effects" }
+ovc-ml = { path = "crates/ovc-ml" }
+ovc-capture = { path = "crates/ovc-capture" }
+ovc-mcam = { path = "crates/ovc-mcam" }
+ovc-ipc = { path = "crates/ovc-ipc" }
+ovc-vcam = { path = "crates/ovc-vcam" }
+# external (versions indicative; pin on first real build)
+anyhow = "1.0.95"
+thiserror = "2.0.11"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+bytemuck = { version = "1.21.0", features = ["derive"] }
+glam = "0.29.2"
+wgpu = "23.0.1"
+pollster = "0.4.0"
+ort = { version = "=2.0.0-rc.13", default-features = false }
+nokhwa = { version = "0.10.7", features = ["input-native"] }
+shared_memory = "0.12.4"
+clap = { version = "4.5.27", features = ["derive"] }
+# Already in the tree (nokhwa); used directly for the shared mapping + DirectShow filter.
+windows = "0.58.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"

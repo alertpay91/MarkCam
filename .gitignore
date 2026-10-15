@@ -1,0 +1,32 @@
+/target
+**/*.rs.bk
+
+# downloaded ML models (see models/manifest.toml)
+/models/*.onnx
+/models/*.bin
+
+# platform plugin build artifacts
+/plugins/**/build/
+/plugins/**/*.o
+/plugins/**/*.obj
+*.ax
+
+# UI
+/ui/node_modules
+/ui/dist
+
+# editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# virtual-background test clips (the user's face) and eval output
+/tools/vbg-eval/clips/
+
+# build outputs and downloads
+/dist/
+/installer/stage/
+/assets/out/
+/assets/cache/
+/tools/effects-art/target/
+/LAPTOP-DIJAGNOSTIKA.md/.claude/

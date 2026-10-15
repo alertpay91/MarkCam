@@ -1,0 +1,28 @@
+[package]
+name = "ovc-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "ovc"
+path = "src/main.rs"
+
+[features]
+default = []
+# Real camera capture (pulls nokhwa + native backends).
+camera = ["ovc-capture/camera"]
+
+[dependencies]
+ovc-core.workspace = true
+ovc-capture.workspace = true
+ovc-vcam.workspace = true
+ovc-effects.workspace = true
+ovc-gpu.workspace = true
+ovc-ipc.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+ctrlc = "3.4.5"

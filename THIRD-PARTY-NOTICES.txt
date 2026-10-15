@@ -1,0 +1,28 @@
+Third-party components in MarkCam
+=================================
+
+Code and models (each under its own license; full texts in the "licenses" folder):
+- ONNX Runtime — Microsoft, MIT License.
+- DirectML — Microsoft, DirectML redistributable license.
+- Robust Video Matting (virtual background) — Shanchuan Lin et al., GPL-3.0.
+- MODNet (virtual background fallback) — ZHKKKe, Apache License 2.0.
+- MediaPipe Face Mesh V2 (face tracking) — Google, Apache License 2.0
+  (ONNX conversion: huggingface.co/fernandotonon/QtMeshEditor-facemesh-onnx).
+- Ultra-Light-Fast-Generic-Face-Detector (version-RFB-320, face detection) — Linzaer, MIT License.
+- VB-CABLE (MarkCam Microphone) — VB-Audio Software, donationware.
+  Origin: www.vb-cable.com. If you find it useful, please support VB-Audio there.
+- FFmpeg — GPL (gyan.dev build); yt-dlp — The Unlicense.
+- Rust crates (egui, wgpu, image, tiny-skia, ab_glyph, tract, ort, nokhwa, …) — MIT / Apache-2.0;
+  see Cargo.lock in the source code.
+
+Art:
+- Noto Animated Emoji — Google, CC BY 4.0 (resized and re-encoded).
+- Fluent Emoji 3D — Microsoft, MIT License (also via the @lobehub/fluent-emoji-3d package, MIT).
+- Fonts: Lilita One, Poppins — SIL Open Font License 1.1; Luckiest Guy — Apache License 2.0.
+- Everything else (hair, beards, backgrounds, borders, classroom bubbles) is MarkCam's own.
+
+MarkCam is an independent project. It is not affiliated with or endorsed by Anthropic,
+ManyCam, VB-Audio, Microsoft, Google or YouTube; their names and marks belong to their owners.
+
+Video links and downloads use yt-dlp. You are responsible for only playing or downloading
+videos you have the right to use, and for following the rules of the site they come from.

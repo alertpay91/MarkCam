@@ -1,0 +1,15 @@
+[package]
+name = "ovc-gpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ovc-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytemuck.workspace = true
+wgpu.workspace = true
+pollster.workspace = true

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.4 -2.4 4.8 5.2" data-face="true" data-frames="36" data-ms="53">
+  <defs><mask id="face"><rect x="-9" y="-9" width="18" height="18" fill="#fff"/><ellipse cx="0" cy="0.62" rx="1.16" ry="1.62" fill="#000"/></mask><linearGradient id="h" x1="0" y1="{{lin 0 1}}" x2="0" y2="{{lin 1 2}}" spreadMethod="repeat"><stop offset="0" stop-color="#ff4d4d"/><stop offset="0.17" stop-color="#ffa64d"/><stop offset="0.33" stop-color="#ffe14d"/><stop offset="0.5" stop-color="#4dd96b"/><stop offset="0.67" stop-color="#4db8ff"/><stop offset="0.83" stop-color="#a64dff"/><stop offset="1" stop-color="#ff4d4d"/></linearGradient></defs>
+  <g mask="url(#face)"><path d="M-1.6 -0.6 Q-1.8 -2.25 0 -2.25 Q1.8 -2.25 1.6 -0.6 Q1.85 1.0 2.0 2.6 Q1.4 2.75 1.0 2.5 Q1.25 1.3 1.1 0.3 L-1.1 0.3 Q-1.25 1.3 -1.0 2.5 Q-1.4 2.75 -2.0 2.6 Q-1.85 1.0 -1.6 -0.6 Z" fill="url(#h)"/></g>
+  <path d="M-1.4 -0.7 Q-1.35 -2.05 0 -2.05 Q1.35 -2.05 1.4 -0.7 Q0.8 -1.15 0 -1.05 Q-0.8 -1.15 -1.4 -0.7 Z" fill="url(#h)"/>
+</svg>

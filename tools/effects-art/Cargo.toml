@@ -1,0 +1,17 @@
+[package]
+name = "effects-art"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Renders MarkCam's own effects and backgrounds from the SVG sources in assets/"
+
+# Standalone: not part of the app workspace (only needed to regenerate the art).
+[workspace]
+
+[dependencies]
+resvg = "0.48"
+png = "0.18"
+anyhow = "1"
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+image-webp = "0.2.4"

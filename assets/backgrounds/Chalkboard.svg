@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+<defs><radialGradient id="g" cx="0.5" cy="0.45" r="0.8"><stop offset="0" stop-color="#2f5d46"/><stop offset="1" stop-color="#1c3a2b"/></radialGradient></defs>
+<rect width="1920" height="1080" fill="url(#g)"/>
+<g stroke="#e8f5ec" stroke-width="5" fill="none" opacity="0.18" stroke-linecap="round"><path d="M200 200 Q400 150 600 230"/><path d="M1300 160 Q1500 120 1700 190"/><path d="M220 880 Q500 840 760 900"/><path d="M1200 860 Q1500 820 1760 890"/></g>
+<g font-family="Segoe Print, Comic Sans MS" fill="#e8f5ec" opacity="0.22" font-size="90"><text x="140" y="360">A b c</text><text x="1420" y="380">1 + 2</text><text x="160" y="760">x y z</text><text x="1400" y="760">7 x 8</text></g>
+</svg>

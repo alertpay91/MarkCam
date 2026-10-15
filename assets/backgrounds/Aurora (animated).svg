@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" data-frames="150" data-ms="40">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#020617"/><stop offset="1" stop-color="#0f172a"/></linearGradient><linearGradient id="a1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22d3ee" stop-opacity="0"/><stop offset="0.5" stop-color="#34d399" stop-opacity="0.55"/><stop offset="1" stop-color="#34d399" stop-opacity="0"/></linearGradient><linearGradient id="a2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a78bfa" stop-opacity="0"/><stop offset="0.5" stop-color="#c084fc" stop-opacity="0.45"/><stop offset="1" stop-color="#c084fc" stop-opacity="0"/></linearGradient></defs>
+<rect width="1920" height="1080" fill="url(#sky)"/>
+<path d="M0 {{osc 380 300}} Q480 {{osc 200 320}} 960 {{osc 360 260}} T1920 {{osc 300 380}} L1920 {{osc 640 560}} Q1440 {{osc 520 620}} 960 {{osc 600 520}} T0 {{osc 560 640}} Z" fill="url(#a1)"/>
+<path d="M0 {{ph 0.5 300 220}} Q480 {{ph 0.5 140 260}} 960 {{ph 0.5 300 200}} T1920 {{ph 0.5 220 300}} L1920 {{ph 0.5 480 400}} Q1440 {{ph 0.5 380 480}} 960 {{ph 0.5 460 380}} T0 {{ph 0.5 420 500}} Z" fill="url(#a2)"/>
+<path d="M0 920 L240 820 L520 900 L820 780 L1140 900 L1440 800 L1700 880 L1920 820 L1920 1080 L0 1080 Z" fill="#020617"/>
+</svg>

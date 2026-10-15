@@ -1,0 +1,69 @@
+[package]
+name = "ovc-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "markcam"
+path = "src/main.rs"
+
+[dependencies]
+ovc-core.workspace = true
+ovc-gpu.workspace = true
+ovc-effects.workspace = true
+ovc-capture = { workspace = true, features = ["camera"] }
+ovc-mcam.workspace = true
+ovc-ml.workspace = true
+ovc-vcam.workspace = true
+anyhow.workspace = true
+# On-demand model download (pure-Rust TLS via rustls; builds on MinGW).
+ureq = "2.10.1"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+# Pure-Rust GUI (glow/OpenGL backend by default — no WebView2, no Node).
+eframe = "0.29.1"
+# Overlay image decoding (PNG/JPEG). 0.25.x is already in the tree via nokhwa.
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# Settings persistence (%APPDATA%\MarkCam\settings.json).
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.140"
+# The main window's HWND (to hide MarkCam from its own screen capture). Already in the tree via eframe.
+raw-window-handle = "0.6"
+# Unpacking the ffmpeg download (and reading .mcv thumbnails in tests).
+zip = { version = "2.2.0", default-features = false, features = ["deflate"] }
+# Effect Maker output (animated PNG) and name banners (vector drawing + fonts); all three
+# are already in the tree (image / egui / resvg-free tiny-skia).
+png = "0.18"
+tiny-skia = "0.11.4"
+ab_glyph = "0.2.32"
+# Native "open file" dialog for loading overlays.
+rfd = "0.15.4"
+
+
+# Video layers (MP4…) via Media Foundation, built into Windows.
+[target.'cfg(windows)'.dependencies]
+# `#[windows::core::interface]` (IPolicyConfig) expands to `::windows_core` paths.
+windows-core = "0.58.0"
+windows = { workspace = true, features = [
+    "implement",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_Media_MediaFoundation",
+    "Win32_Media_Audio",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_Shell",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.19"

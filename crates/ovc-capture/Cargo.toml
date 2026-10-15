@@ -1,0 +1,20 @@
+[package]
+name = "ovc-capture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ovc-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# Real camera capture is opt-in so the default (test-pattern) build pulls no native deps.
+nokhwa = { workspace = true, optional = true }
+# Same libjpeg-turbo binding nokhwa uses internally; driven directly for faster MJPEG decode.
+mozjpeg = { version = "0.10", optional = true }
+
+[features]
+default = []
+camera = ["dep:nokhwa", "dep:mozjpeg"]

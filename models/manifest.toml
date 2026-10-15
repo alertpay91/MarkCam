@@ -1,0 +1,24 @@
+# ML model manifest. Models are downloaded on first use (never committed).
+# Verified by sha256. Swap any entry for your preferred model.
+
+[face_detector]
+# Lightweight single-shot face detector (BlazeFace-class).
+file = "face_detector.onnx"
+url = "https://example.org/models/face_detector.onnx"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+input = { name = "input", layout = "NHWC", width = 128, height = 128, color = "rgb", scale = "0..1" }
+
+[landmarks]
+# 68/478-point facial landmark regressor.
+file = "landmarks.onnx"
+url = "https://example.org/models/landmarks.onnx"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+input = { name = "input", layout = "NHWC", width = 192, height = 192, color = "rgb", scale = "0..1" }
+
+[segmenter]
+# Portrait / background segmentation (selfie-segmentation class).
+file = "segmenter.onnx"
+url = "https://example.org/models/segmenter.onnx"
+sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+input = { name = "input", layout = "NHWC", width = 256, height = 256, color = "rgb", scale = "0..1" }
+output = { kind = "mask", channels = 1 }

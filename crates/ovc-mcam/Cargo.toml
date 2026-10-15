@@ -1,0 +1,21 @@
+[package]
+name = "ovc-mcam"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# Importer for ManyCam's effect format (reverse-engineered for interoperability):
+#   .mcep  = ZIP { effect_pack_info.json, N × .mcv }
+#   .mcv   = ZIP { effect.json, properties.json, images/main/<asset>, images/thumbnail/* }
+# Effect types: object / fullscreen_object (positioned PNG), animation (GIF), face_* (landmark-anchored).
+
+[dependencies]
+anyhow.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.140"
+zip = { version = "2.2.0", default-features = false, features = ["deflate"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# Animated WebP decoded directly: image's wrapper never sets a background color, so frames
+# that ask to be cleared ("dispose to background") stay on screen as ghosts.
+image-webp = "0.2.4"

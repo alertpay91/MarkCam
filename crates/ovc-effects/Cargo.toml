@@ -1,0 +1,15 @@
+[package]
+name = "ovc-effects"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ovc-core.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+bytemuck.workspace = true
+
+# GPU execution of effects lives in `ovc-gpu` (which depends on this crate), so the
+# effect definitions + CPU fallback stay free of wgpu — keeping the headless build light.

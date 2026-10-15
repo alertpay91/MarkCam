@@ -1,0 +1,28 @@
+[package]
+name = "ovc-ml"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ovc-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# Delaunay triangulation of the landmark mesh for piecewise-affine mask warping.
+delaunator = "1.0.2"
+# Pure-Rust ONNX inference (no native DLL; builds on MinGW and Linux). Runs the face
+# detector + landmark models the user chose, where ONNX Runtime (`ort`) cannot build.
+tract-onnx = "0.21.13"
+# ONNX Runtime for the person segmentation (virtual background): loaded at run time from the
+# onnxruntime.dll shipped next to the exe (`load-dynamic`), so nothing is linked — which is
+# what makes it work on the MinGW toolchain. DirectML runs the model on any DX12 GPU
+# (Intel HD 620 included); the CPU is the fallback. ~20x faster than tract for this model.
+ort = { workspace = true, features = ["std", "load-dynamic", "directml", "api-22"] }
+
+[features]
+default = []
+
+[dev-dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }

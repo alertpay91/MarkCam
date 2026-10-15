@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.55 -2.35 3.1 1.35" data-face="true">
+  <defs><linearGradient id="r" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#b3001b"/><stop offset="1" stop-color="#ff3b3b"/></linearGradient></defs>
+  <path d="M-1.0 -1.1 Q-1.25 -1.75 -0.95 -2.25 Q-0.88 -1.75 -0.45 -1.35 Z" fill="url(#r)"/>
+  <path d="M1.0 -1.1 Q1.25 -1.75 0.95 -2.25 Q0.88 -1.75 0.45 -1.35 Z" fill="url(#r)"/>
+</svg>

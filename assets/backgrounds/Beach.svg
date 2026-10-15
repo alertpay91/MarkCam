@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080">
+<defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset="1" stop-color="#bae6fd"/></linearGradient><linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0ea5e9"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+<rect width="1920" height="600" fill="url(#sky)"/><circle cx="1600" cy="180" r="90" fill="#fde047"/><rect y="560" width="1920" height="260" fill="url(#sea)"/>
+<path d="M0 760 Q480 720 960 770 Q1440 820 1920 760 L1920 1080 L0 1080 Z" fill="#fde68a"/><path d="M0 760 Q480 720 960 770 Q1440 820 1920 760" stroke="#fff" stroke-width="10" fill="none" opacity="0.8"/>
+<g fill="#fff" opacity="0.9"><ellipse cx="400" cy="200" rx="120" ry="40"/><ellipse cx="480" cy="180" rx="90" ry="45"/><ellipse cx="1000" cy="130" rx="140" ry="40"/></g>
+<path d="M260 980 Q300 700 260 520" stroke="#92400e" stroke-width="28" fill="none"/><g fill="#16a34a"><path d="M260 520 Q140 470 60 560 Q170 500 260 540 Z"/><path d="M260 520 Q380 460 470 540 Q360 500 260 540 Z"/><path d="M260 520 Q200 400 100 380 Q210 430 255 530 Z"/><path d="M260 520 Q330 400 440 400 Q320 440 265 530 Z"/></g>
+</svg>

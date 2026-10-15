@@ -1,0 +1,20 @@
+[package]
+name = "ovc-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+bytemuck.workspace = true
+
+# Windows: a pagefile-backed named mapping (no disk file — see ring.rs).
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_Memory", "Win32_Security", "Win32_System_Threading"] }
+
+# Elsewhere: shared_memory provides the named mapping.
+[target.'cfg(not(windows))'.dependencies]
+shared_memory.workspace = true

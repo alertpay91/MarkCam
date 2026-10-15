@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.75 -3.0 3.5 2.0" data-face="true">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3a6"/><stop offset="0.45" stop-color="#ffc928"/><stop offset="1" stop-color="#c78a00"/></linearGradient></defs>
+  <path d="M-1.4 -1.15 L-1.5 -2.55 L-0.85 -1.85 L-0.45 -2.8 L0 -1.95 L0.45 -2.8 L0.85 -1.85 L1.5 -2.55 L1.4 -1.15 Q0 -0.95 -1.4 -1.15 Z" fill="url(#g)" stroke="#9a6a00" stroke-width="0.05" stroke-linejoin="round"/>
+  <path d="M-1.4 -1.45 Q0 -1.25 1.4 -1.45 L1.4 -1.15 Q0 -0.95 -1.4 -1.15 Z" fill="#e8a800"/>
+  <g stroke="#7a5200" stroke-width="0.03"><circle cx="-1.5" cy="-2.6" r="0.12" fill="#ff3b5c"/><circle cx="-0.45" cy="-2.85" r="0.13" fill="#3bd1ff"/><circle cx="0.45" cy="-2.85" r="0.13" fill="#3bd1ff"/><circle cx="1.5" cy="-2.6" r="0.12" fill="#ff3b5c"/></g>
+  <ellipse cx="0" cy="-1.75" rx="0.16" ry="0.2" fill="#ff3b5c" stroke="#7a5200" stroke-width="0.03"/>
+  <ellipse cx="-0.85" cy="-1.6" rx="0.12" ry="0.15" fill="#3be08a" stroke="#7a5200" stroke-width="0.03"/>
+  <ellipse cx="0.85" cy="-1.6" rx="0.12" ry="0.15" fill="#3be08a" stroke="#7a5200" stroke-width="0.03"/>
+  <path d="M-1.1 -1.95 L-1.0 -2.2 M0.2 -2.3 L0.3 -2.5" stroke="#fff" stroke-opacity="0.7" stroke-width="0.05" stroke-linecap="round"/>
+</svg>
