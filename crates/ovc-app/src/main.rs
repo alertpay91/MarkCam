@@ -1247,6 +1247,7 @@ impl Fx {
 
         // 0. Virtual background: the person in front of the chosen background (everything
         //    below then works on that picture).
+        self.vbg.release_unused();
         let mut bgbuf = std::mem::take(&mut self.bgbuf);
         let bg_on = self.vbg.active() && self.vbg.composite(&self.cur_rgba, self.cur_seq, w, h, &mut bgbuf);
         let base: &[u8] = if bg_on { &bgbuf } else { &self.cur_rgba };

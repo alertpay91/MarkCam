@@ -914,6 +914,19 @@ impl Compositor {
         self.active() && (!self.key_mode || self.key_ai)
     }
 
+    /// Let go of what only the current choice needs: a background video keeps decoding on
+    /// its own thread until it is dropped (turning the background off or choosing a picture
+    /// must stop it).
+    pub fn release_unused(&mut self) {
+        let video_choice = matches!(&self.choice, Choice::File(p) if crate::video::is_video_file(p));
+        if !video_choice && self.video.is_some() {
+            self.video = None;
+        }
+        if self.choice == Choice::Off {
+            self.still = None;
+        }
+    }
+
     /// The camera frame the newest matte was made from, if there is one.
     pub fn matte_seq(&self) -> Option<u64> {
         self.matte_src.as_ref().and_then(|m| m.lock().unwrap().back().map(|m| m.seq))
