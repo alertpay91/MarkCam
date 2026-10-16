@@ -16,6 +16,7 @@ mod autostart;
 /// (only MarkCam's own effects), the VB-CABLE name kept visible on the microphone.
 pub const PUBLIC: bool = option_env!("MARKCAM_PUBLIC").is_some();
 mod banner;
+mod boost;
 mod maker;
 mod link;
 mod screen;
@@ -1042,6 +1043,9 @@ struct Fx {
     filter_amount: f32,
     vignette_amount: f32,
     vignette: ovc_effects::cpu::Vignette,
+    /// Camera boost (weak webcams): automatic light/color + calmer grain + crisper edges.
+    boost_on: bool,
+    boost: boost::CameraBoost,
     warp: Warp,
     warp_r: ovc_effects::cpu::WarpRenderer,
     warp_follow_face: bool,
@@ -1113,6 +1117,8 @@ impl Fx {
             filter_amount: 1.0,
             vignette_amount: 0.0,
             vignette: Default::default(),
+            boost_on: false,
+            boost: boost::CameraBoost::default(),
             warp: Warp::default(),
             warp_r: Default::default(),
             warp_follow_face: true,
@@ -1282,6 +1288,13 @@ impl Fx {
         } else {
             filter_m
         };
+        // Camera boost: its light/color correction rides in the same color pass.
+        let color = if self.boost_on {
+            self.boost.observe(&self.cur_rgba, w, h);
+            color.then(&self.boost.matrix())
+        } else {
+            color
+        };
         let color_on = !color.is_identity();
 
         // 0. Virtual background: the person in front of the chosen background (everything
@@ -1311,6 +1324,16 @@ impl Fx {
         } else {
             false
         };
+
+        // Camera boost: calmer grain (one extra pass).
+        if self.boost_on {
+            if !use_work {
+                self.work.clear();
+                self.work.extend_from_slice(base);
+                use_work = true;
+            }
+            self.boost.detail(&mut self.work, &mut self.work2, w, h);
+        }
 
         // 2. Distortion (reads one buffer, writes the other). Bulge/pinch/swirl can
         //    follow the face: centered on the nose tip, sized to the face width.
@@ -1652,6 +1675,7 @@ impl Studio {
                 s.banner_pending = true;
             }
             s.about_open = std::env::var_os("OVC_TEST_ABOUT").is_some();
+            s.picking_key = std::env::var_os("OVC_TEST_LOUPE").is_some();
             if let Some(p) = std::env::var_os("OVC_TEST_MAKER") {
                 if let Ok(project) = maker::load_project(Path::new(&p)) {
                     s.maker = Some(maker::Maker::open(project));
@@ -1693,6 +1717,7 @@ impl Studio {
         fx.filter = Filter::from_id(&c.filter);
         fx.filter_amount = c.filter_amount;
         fx.vignette_amount = c.vignette;
+        fx.boost_on = c.camera_boost;
         fx.warp = Warp {
             kind: WarpKind::from_id(&c.warp),
             cx: c.warp_center[0],
@@ -2012,6 +2037,7 @@ impl Studio {
             filter: fx.filter.id().into(),
             filter_amount: fx.filter_amount,
             vignette: fx.vignette_amount,
+            camera_boost: fx.boost_on,
             warp: fx.warp.kind.id().into(),
             warp_center: [fx.warp.cx, fx.warp.cy],
             warp_radius: fx.warp.radius,
@@ -3112,6 +3138,19 @@ impl Studio {
 
                     Tab::Adjust => {
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                            theme::card(ui, |ui| {
+                                let mut on = fx.boost_on;
+                                if ui
+                                    .checkbox(&mut on, egui::RichText::new("✨ Camera boost").strong())
+                                    .on_hover_text("For weak (laptop) webcams: automatic brightness, contrast and color, and calmer grain.")
+                                    .changed()
+                                {
+                                    fx.boost_on = on;
+                                    fx.boost.reset();
+                                }
+                                ui.label(egui::RichText::new("Makes a weak or laptop webcam look better: light and color are corrected automatically and the grain is calmed.").small().color(theme::TEXT_DIM));
+                            });
+                            ui.add_space(6.0);
                             for (title, weather) in [("Weather", true), ("Animated", false)] {
                                 theme::section(ui, title);
                                 theme::card(ui, |ui| {
@@ -3597,6 +3636,54 @@ impl Studio {
             // Eyedropper: the next click picks the color key from the camera picture.
             if self.picking_key {
                 let response = response.clone().on_hover_cursor(egui::CursorIcon::Crosshair);
+                // Magnifier: the pixels around the pointer, enlarged, the one that will be
+                // picked marked, and its color — so you see exactly what you click.
+                // OVC_TEST_LOUPE=u,v (0..1): show the loupe there (screenshot tests).
+                let test_pos = std::env::var("OVC_TEST_LOUPE").ok().and_then(|v| {
+                    let (a, b) = v.split_once(',')?;
+                    Some(egui::pos2(rect.min.x + a.trim().parse::<f32>().ok()? * rect.width(), rect.min.y + b.trim().parse::<f32>().ok()? * rect.height()))
+                });
+                if let (Some(p), true) = (response.hover_pos().or(test_pos), fx.w > 0 && !fx.cur_rgba.is_empty()) {
+                    let (u, v) = s2n(p);
+                    let (w, h) = (fx.w as i64, fx.h as i64);
+                    let (cx, cy) = ((u.clamp(0.0, 1.0) * w as f32) as i64, (v.clamp(0.0, 1.0) * h as f32) as i64);
+                    const N: i64 = 11;
+                    let cell = 10.0f32;
+                    let size = cell * N as f32;
+                    let mut org = p + egui::vec2(24.0, 24.0);
+                    if org.x + size > rect.max.x {
+                        org.x = p.x - 24.0 - size;
+                    }
+                    if org.y + size + 30.0 > rect.max.y {
+                        org.y = p.y - 24.0 - size - 30.0;
+                    }
+                    let painter = ui.painter_at(rect);
+                    let frame = egui::Rect::from_min_size(org, egui::vec2(size, size));
+                    painter.rect_filled(frame.expand(3.0), 6.0, egui::Color32::from_rgb(20, 22, 28));
+                    let px = |x: i64, y: i64| -> egui::Color32 {
+                        let (x, y) = (x.clamp(0, w - 1), y.clamp(0, h - 1));
+                        let i = ((y * w + x) * 4) as usize;
+                        egui::Color32::from_rgb(fx.cur_rgba[i], fx.cur_rgba[i + 1], fx.cur_rgba[i + 2])
+                    };
+                    for j in 0..N {
+                        for i in 0..N {
+                            // Shown as on screen (mirrored preview → mirrored loupe).
+                            let dx = if mirror { N / 2 - i } else { i - N / 2 };
+                            let r = egui::Rect::from_min_size(org + egui::vec2(i as f32 * cell, j as f32 * cell), egui::vec2(cell, cell));
+                            painter.rect_filled(r, 0.0, px(cx + dx, cy + j - N / 2));
+                        }
+                    }
+                    let mid = egui::Rect::from_min_size(org + egui::vec2((N / 2) as f32 * cell, (N / 2) as f32 * cell), egui::vec2(cell, cell));
+                    painter.rect_stroke(mid.expand(1.0), 0.0, egui::Stroke::new(2.0_f32, egui::Color32::BLACK));
+                    painter.rect_stroke(mid, 0.0, egui::Stroke::new(1.5_f32, egui::Color32::WHITE));
+                    painter.rect_stroke(frame.expand(3.0), 6.0, egui::Stroke::new(1.5_f32, theme::ACCENT));
+                    let c = vbg::pick_color(&fx.cur_rgba, w as usize, h as usize, cx.clamp(0, w - 1) as usize, cy.clamp(0, h - 1) as usize);
+                    let sw = egui::Rect::from_min_size(egui::pos2(frame.min.x - 3.0, frame.max.y + 6.0), egui::vec2(size + 6.0, 24.0));
+                    painter.rect_filled(sw, 5.0, egui::Color32::from_rgb(c[0], c[1], c[2]));
+                    let txt = if (c[0] as u32 * 3 + c[1] as u32 * 6 + c[2] as u32) / 10 > 140 { egui::Color32::BLACK } else { egui::Color32::WHITE };
+                    painter.text(sw.center(), egui::Align2::CENTER_CENTER, format!("#{:02X}{:02X}{:02X} · click", c[0], c[1], c[2]), egui::FontId::proportional(12.0), txt);
+                    ui.ctx().request_repaint();
+                }
                 if response.clicked() {
                     if let Some(p) = response.interact_pointer_pos() {
                         let (u, v) = s2n(p);

@@ -38,6 +38,8 @@ pub struct Settings {
     pub filter_amount: f32,
     /// Vignette strength (0 = off).
     pub vignette: f32,
+    /// Camera boost for weak webcams.
+    pub camera_boost: bool,
     /// Distortion (`WarpKind::id`) and its parameters.
     pub warp: String,
     pub warp_center: [f32; 2],
@@ -116,6 +118,7 @@ impl Default for Settings {
             filter: "none".into(),
             filter_amount: 1.0,
             vignette: 0.0,
+            camera_boost: false,
             warp: "none".into(),
             warp_center: [0.5, 0.45],
             warp_radius: 0.35,

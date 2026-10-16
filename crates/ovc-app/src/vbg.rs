@@ -1324,7 +1324,9 @@ fn ycc(c: [u8; 3]) -> (f32, f32, f32) {
 /// still "the same green"; a white/grey wall by chroma *and* brightness (chroma alone can't
 /// tell a white wall from skin).
 fn key_alpha_of(px: [u8; 3], k: &KeyRef, sim: f32, smooth: f32) -> u8 {
-    let wl = if k.saturated { 0.08 } else { 0.6 };
+    // Brightness counts too (a green shirt is darker than the green wall): only the
+    // screen's own shadows and bright spots stay "the same color".
+    let wl = if k.saturated { 0.25 } else { 0.6 };
     let (py, pcb, pcr) = ycc(px);
     let dc = if k.saturated {
         // Very dark pixels have no reliable hue: count them as not the screen.
@@ -1332,7 +1334,7 @@ fn key_alpha_of(px: [u8; 3], k: &KeyRef, sim: f32, smooth: f32) -> u8 {
             1.0
         } else {
             let pc = chromaticity(px);
-            ((pc.0 - k.chroma.0).powi(2) + (pc.1 - k.chroma.1).powi(2)).sqrt() * 2.5
+            ((pc.0 - k.chroma.0).powi(2) + (pc.1 - k.chroma.1).powi(2)).sqrt() * 3.0
         }
     } else {
         ((pcb - k.cb).powi(2) + (pcr - k.cr).powi(2)).sqrt() / 128.0
@@ -1423,12 +1425,13 @@ pub fn auto_key(src: &[u8], w: usize, h: usize) -> [u8; 3] {
     [(sum[0] / n as u64) as u8, (sum[1] / n as u64) as u8, (sum[2] / n as u64) as u8]
 }
 
-/// Average color of a 9x9 patch around (`x`, `y`) — the eyedropper.
+/// The eyedropper: the color of the pixel at (`x`, `y`), averaged with its 8 neighbours
+/// only to take the camera grain out (a bigger patch mixes in what is next to it).
 pub fn pick_color(src: &[u8], w: usize, h: usize, x: usize, y: usize) -> [u8; 3] {
     let mut sum = [0u32; 3];
     let mut n = 0;
-    for yy in y.saturating_sub(4)..(y + 5).min(h) {
-        for xx in x.saturating_sub(4)..(x + 5).min(w) {
+    for yy in y.saturating_sub(1)..(y + 2).min(h) {
+        for xx in x.saturating_sub(1)..(x + 2).min(w) {
             let i = (yy * w + xx) * 4;
             for k in 0..3 {
                 sum[k] += src[i + k] as u32;
