@@ -286,6 +286,10 @@ struct Overlay {
     // current frame rescaled to a pixel rect, cached by (frame index, dst w, dst h)
     cache: Vec<u8>,
     cache_key: (usize, u32, u32),
+    /// Every animation frame already resized to `scaled_size` (empty = not yet), so a
+    /// looping GIF is resized once, not 30 times a second.
+    scaled: Vec<Vec<u8>>,
+    scaled_size: (u32, u32),
     // Face mask: pivot points (normalized to the mask image) matching 68 dlib landmarks.
     // `Some` means this layer is warped onto detected landmarks instead of rectangle-placed.
     face: Option<Vec<[f32; 2]>>,
@@ -427,6 +431,8 @@ impl Overlay {
             started: std::time::Instant::now(),
             cache: Vec::new(),
             cache_key: (usize::MAX, 0, 0),
+            scaled: Vec::new(),
+            scaled_size: (0, 0),
             face: None,
             anchor: None,
             pose: None,
@@ -475,7 +481,22 @@ impl Overlay {
 
     /// The current frame resized to `tw`x`th` in `self.cache` (green keyed out if asked).
     fn ensure_cache(&mut self, tw: u32, th: u32) -> bool {
-        if self.cache_key != (self.cur, tw, th) {
+        if self.cache_key == (self.cur, tw, th) {
+            return true;
+        }
+        if self.scaled_size != (tw, th) || self.scaled.len() != self.frames.len() {
+            self.scaled = vec![Vec::new(); self.frames.len()];
+            self.scaled_size = (tw, th);
+        } else if self.cache_key.0 < self.scaled.len() && (self.cache_key.1, self.cache_key.2) == (tw, th) {
+            // Park the frame we leave; it comes back on the next loop.
+            self.scaled[self.cache_key.0] = std::mem::take(&mut self.cache);
+        }
+        if self.scaled.get(self.cur).is_some_and(|v| !v.is_empty()) {
+            self.cache = std::mem::take(&mut self.scaled[self.cur]);
+            self.cache_key = (self.cur, tw, th);
+            return true;
+        }
+        {
             let Some(fr) = self.frames.get(self.cur) else { return false };
             let src = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(fr.w, fr.h, fr.rgba.clone());
             self.cache = match src {
@@ -499,6 +520,7 @@ impl Overlay {
                 self.frames = vec![ovc_mcam::Frame { rgba: rgba.as_ref().clone(), w, h, delay_ms: 0 }];
                 self.cur = 0;
                 self.cache_key = (usize::MAX, 0, 0);
+                self.scaled_size = (0, 0);
             }
         }
     }
@@ -534,7 +556,11 @@ impl Overlay {
         let (ox, oy) = (apos[0] * unit, apos[1] * unit);
         let (cx, cy) = (mx + ox * cs - oy * sn, my + ox * sn + oy * cs);
         // Quantize the size so slow zooming doesn't re-resize the image every frame.
-        let q = |v: f32| ((v / 2.0).round() * 2.0).clamp(2.0, 4096.0) as u32;
+        // ~3% steps: small zooms keep the resized animation frames.
+        let q = |v: f32| {
+            let step = (v * 0.03).max(2.0);
+            ((v / step).round() * step).clamp(2.0, 4096.0) as u32
+        };
         let (tw, th) = (q(asize[0] * unit * self.scale), q(asize[1] * unit * self.scale));
         if !self.ensure_cache(tw, th) {
             return;
@@ -1092,7 +1118,7 @@ impl Fx {
     /// same frame, so the outline never trails behind a moving head or hand (the picture
     /// waits a frame or two for it, like in Zoom). `None` = nothing to show this time.
     fn sync_with_matte(&mut self, data: &Arc<[u8]>, w: u32, h: u32) -> Option<(u64, Arc<[u8]>)> {
-        let ready = match (self.vbg.needs_matte(), self.vbg.matte_seq()) {
+        let ready = match (self.vbg.needs_matte() && self.vbg.wait_for_matte, self.vbg.matte_seq()) {
             (true, Some(s)) => s,
             _ => {
                 self.bg_queue.clear();
@@ -3010,6 +3036,7 @@ impl Studio {
                                                 .changed()
                                             {
                                                 ov.cache_key = (usize::MAX, 0, 0);
+                                                ov.scaled_size = (0, 0);
                                             }
                                             if ui.small_button("Center").clicked() {
                                                 center = Some(i);
@@ -4030,13 +4057,15 @@ impl Studio {
         // Person segmentation, while a virtual background is chosen (shut down 3 s after).
         let want_bg = fx.vbg.needs_matte();
         if want_bg && self.seg.is_none() {
-            let w = vbg::SegWorker::start(self.cap.latest.clone(), fx.vbg.quality);
+            let integrated = fx.gpu.adapter_info.to_string().contains("IntegratedGpu");
+            let w = vbg::SegWorker::start(self.cap.latest.clone(), fx.vbg.quality, integrated);
             fx.vbg.matte_src = Some(w.matte.clone());
             self.seg = Some(w);
         }
         if let Some(sw) = &self.seg {
             sw.want.store(want_bg && !self.frozen, Ordering::SeqCst);
             sw.quality.store(fx.vbg.quality, Ordering::SeqCst);
+            fx.vbg.wait_for_matte = sw.fast.load(Ordering::SeqCst);
         }
         if want_bg {
             self.seg_idle_since = None;
@@ -4059,7 +4088,9 @@ impl Studio {
             self.face_idle_since = None;
         } else if self.tracker.is_some() {
             let since = *self.face_idle_since.get_or_insert_with(std::time::Instant::now);
-            if since.elapsed() >= std::time::Duration::from_secs(3) {
+            // Kept a while (idle it costs nothing but memory): switching between face effects
+            // must not reload the models each time.
+            if since.elapsed() >= std::time::Duration::from_secs(120) {
                 self.tracker = None;
                 self.face_idle_since = None;
             }

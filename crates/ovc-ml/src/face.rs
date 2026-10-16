@@ -69,7 +69,9 @@ pub const FACEMESH_TO_68: [usize; 68] = [
 /// Loads and runs the detector + a landmark model.
 pub struct FaceTracker {
     det: Plan,
-    lmk: Plan,
+    /// The landmark model in tract — only built when ONNX Runtime isn't used for it
+    /// (optimizing Face Mesh in tract takes seconds of CPU).
+    lmk: Option<Plan>,
     /// The same landmark model in ONNX Runtime (CPU, one thread) when it is loaded — about
     /// 5× faster than tract for Face Mesh; tract stays as the fallback.
     lmk_ort: Option<std::sync::Mutex<ort::session::Session>>,
@@ -83,12 +85,12 @@ impl FaceTracker {
         let det = load_plan(det_path, &[1, 3, DET_H, DET_W]).context("load face detector")?;
         let s = kind.input();
         let shape = if kind == Lmk::FaceMesh { [1, s, s, 3] } else { [1, 3, s, s] };
-        let lmk = load_plan(lmk_path, &shape).context("load landmark model")?;
         // ONNX Runtime, if `seg::init_runtime` was called (otherwise this just fails).
         let build = || -> ort::Result<ort::session::Session> {
             ort::session::Session::builder()?.with_intra_op_spinning(false)?.with_inter_op_spinning(false)?.with_intra_threads(1)?.commit_from_file(lmk_path)
         };
         let lmk_ort = (kind == Lmk::FaceMesh).then(build).and_then(|r| r.ok()).map(std::sync::Mutex::new);
+        let lmk = if lmk_ort.is_none() { Some(load_plan(lmk_path, &shape).context("load landmark model")?) } else { None };
         Ok(Self { det, lmk, lmk_ort, kind, min_score: 0.6 })
     }
 
@@ -212,7 +214,7 @@ impl FaceTracker {
             return Ok(flat.chunks_exact(3).map(|p| to_frame(p[0], p[1])).collect());
         }
         let t = if self.kind == Lmk::FaceMesh { Tensor::from_shape(&[1, s, s, 3], &input)? } else { Tensor::from_shape(&[1, 3, s, s], &input)? };
-        let out = self.lmk.run(tvec!(t.into()))?;
+        let out = self.lmk.as_ref().context("no landmark model")?.run(tvec!(t.into()))?;
         let pts = match self.kind {
             Lmk::Fan256 => {
                 let lm = out[0].to_array_view::<f32>()?; // [1,68,3]

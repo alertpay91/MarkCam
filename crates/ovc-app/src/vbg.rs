@@ -204,12 +204,18 @@ pub struct SegWorker {
 
     /// Edge quality (`QUALITY_*`); the worker switches models when it changes.
     pub quality: Arc<AtomicU8>,
+    /// Mattes come fast enough (a fast graphics chip) for each frame to wait for its own;
+    /// otherwise frames go on with the newest matte (the picture never stalls).
+    pub fast: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
 
 impl SegWorker {
-    pub fn start(latest: Latest, quality: u8) -> Self {
+    /// `integrated_gpu`: the graphics chip is built into the processor (Intel HD / UHD…).
+    /// DirectML runs the matting model there 10–100× too slowly, so it goes on the CPU.
+    pub fn start(latest: Latest, quality: u8, integrated_gpu: bool) -> Self {
         let quality = Arc::new(AtomicU8::new(quality));
+        let fast = Arc::new(AtomicBool::new(false));
         let want = Arc::new(AtomicBool::new(true));
         let run = Arc::new(AtomicBool::new(true));
         let matte: Mattes = Arc::new(Mutex::new(std::collections::VecDeque::new()));
@@ -218,15 +224,15 @@ impl SegWorker {
         let handle = std::thread::Builder::new()
             .name("markcam-segment".into())
             .spawn({
-                let (want, run, matte, status, q) = (want.clone(), run.clone(), matte.clone(), status.clone(), quality.clone());
+                let (want, run, matte, status, q, fast) = (want.clone(), run.clone(), matte.clone(), status.clone(), quality.clone(), fast.clone());
                 move || {
-                    if let Err(e) = worker(&latest, &want, &run, &matte, &status, &q) {
+                    if let Err(e) = worker(&latest, &want, &run, &matte, &status, &q, &fast, integrated_gpu) {
                         *status.lock().unwrap() = format!("not available: {e}");
                     }
                 }
             })
             .ok();
-        SegWorker { want, run, matte, status, quality, handle }
+        SegWorker { want, run, matte, status, quality, fast, handle }
     }
 }
 
@@ -246,23 +252,31 @@ fn worker(
     out: &Mutex<std::collections::VecDeque<Arc<Matte>>>,
     status: &Mutex<String>,
     quality: &AtomicU8,
+    fast: &AtomicBool,
+    integrated_gpu: bool,
 ) -> anyhow::Result<()> {
     let dir = runtime_dir().ok_or_else(|| anyhow::anyhow!("ONNX Runtime is missing (reinstall MarkCam)"))?;
     let model = model_path().ok_or_else(|| anyhow::anyhow!("the background model is missing (reinstall MarkCam)"))?;
     ovc_ml::seg::init_runtime(&dir)?;
     let mut want_quality = quality.load(Ordering::SeqCst);
-    let mut engine = Engine::load(&model, want_quality != QUALITY_LIGHT)?;
-    let gpu = engine.gpu();
+    let mut cpu_only = integrated_gpu || std::env::var_os("OVC_VBG_CPU").is_some();
+    let mut engine = Engine::load(&model, want_quality != QUALITY_LIGHT, cpu_only)?;
+    let mut gpu = engine.gpu();
     // Auto: the best model only while it keeps up with the camera (~30 fps).
     let mut best_checked = 0u32;
     let mut best_sum = 0f32;
     // RVM wants every frame (it is recurrent and fast on a GPU); MODNet / the CPU are rate
     // limited.
-    let min_gap = Duration::from_millis(match (&engine, gpu) {
-        (Engine::Rvm(..), true) => 0,
-        (_, true) => 66,
-        _ => 100,
-    });
+    let gap_for = |e: &Engine, gpu: bool| {
+        Duration::from_millis(match (e, gpu) {
+            (Engine::Rvm(..), true) => 0,
+            // CPU: ~15 mattes a second (the frames in between use the nearest one).
+            _ => 66,
+        })
+    };
+    let mut min_gap = gap_for(&engine, gpu);
+    // Model time of the first frames on the graphics chip (to give up on a slow one).
+    let mut gpu_probe: Vec<f32> = Vec::new();
     let mut last_seq = u64::MAX;
     let mut last_size = (0, 0);
     let mut still_thumb: Option<Vec<u8>> = None;
@@ -275,7 +289,10 @@ fn worker(
         let q = quality.load(Ordering::SeqCst);
         if q != want_quality {
             want_quality = q;
-            engine = Engine::load(&model, q != QUALITY_LIGHT)?;
+            engine = Engine::load(&model, q != QUALITY_LIGHT, cpu_only)?;
+            gpu = engine.gpu();
+            min_gap = gap_for(&engine, gpu);
+            gpu_probe.clear();
             best_checked = 0;
             best_sum = 0.0;
             model_avg = 0.0;
@@ -285,9 +302,30 @@ fn worker(
         let best_ms = best_sum / 30.0;
         if want_quality == QUALITY_AUTO && engine.is_best() && best_checked == 40 && best_ms > 28.0 {
             tracing::warn!("best background model too slow here ({best_ms:.0} ms): using the light one");
-            engine = Engine::load(&model, false)?;
+            engine = Engine::load(&model, false, cpu_only)?;
             model_avg = 0.0;
             ms_avg = 0.0;
+            gpu_probe.clear();
+        }
+        // A graphics chip that is much too slow for the model (after its warm-up): use the
+        // CPU instead, for good.
+        if gpu && gpu_probe.len() >= 6 {
+            let mut v = gpu_probe[2..].to_vec();
+            v.sort_by(f32::total_cmp);
+            let median = v[v.len() / 2];
+            if median > 45.0 {
+                tracing::warn!("graphics chip too slow for the background ({median:.0} ms): using the CPU");
+                cpu_only = true;
+                engine = Engine::load(&model, false, true)?;
+                gpu = engine.gpu();
+                min_gap = gap_for(&engine, gpu);
+                model_avg = 0.0;
+                ms_avg = 0.0;
+            }
+            gpu_probe.clear();
+            if !cpu_only {
+                gpu_probe.push(f32::NAN); // probe done: never again
+            }
         }
         if !want.load(Ordering::SeqCst) {
             prev = None;
@@ -325,7 +363,7 @@ fn worker(
         }
         last_seq = seq;
         last_run = Instant::now();
-        let (rw, rh) = refine_size(fw, fh);
+        let (rw, rh) = refine_size(fw, fh, engine.width());
         let mut prof = [0f32; 5];
         let tp = Instant::now();
         let rgb = small_rgb(&rgba, fw, fh, rw, rh);
@@ -368,6 +406,11 @@ fn worker(
         }
         let ms = last_run.elapsed().as_secs_f32() * 1000.0;
         let model_ms = t_model.as_secs_f32() * 1000.0;
+        if gpu && gpu_probe.len() < 6 && !gpu_probe.iter().any(|v| v.is_nan()) {
+            gpu_probe.push(model_ms);
+        }
+        // Each frame may wait for its own matte only when they come at camera speed.
+        fast.store(gpu && model_avg > 0.0 && model_avg < 25.0, Ordering::SeqCst);
         best_checked += 1;
         if (11..=40).contains(&best_checked) {
             best_sum += model_ms;
@@ -394,27 +437,44 @@ enum Engine {
 }
 
 impl Engine {
-    fn load(modnet: &Path, best: bool) -> anyhow::Result<Engine> {
+    /// `cpu`: don't try the graphics chip (integrated, or measured too slow).
+    fn load(modnet: &Path, best: bool, cpu: bool) -> anyhow::Result<Engine> {
         let dir = modnet.parent().map(Path::to_path_buf).unwrap_or_default();
         let best_file = Some(dir.join(RVM_BEST_MODEL)).filter(|p| best && p.is_file());
         let rvm_file = std::env::var_os("OVC_VBG_RVM").map(PathBuf::from).or(best_file.clone()).or_else(|| Some(dir.join(RVM_MODEL)));
         if let Some(rvm) = rvm_file.filter(|p| p.is_file()) {
             let is_best = rvm.file_name().is_some_and(|n| n == RVM_BEST_MODEL);
             // Input at the refine size; the model looks at half of it and refines back up.
-            match ovc_ml::seg::VideoMatter::load(&rvm, 640, 360, tune().ratio, true, 2) {
+            if cpu {
+                // The light model on the CPU, small (448 wide): ~15 ms on a desktop, ~30 ms
+                // on a 7th-gen laptop.
+                let light = dir.join(RVM_MODEL);
+                if light.is_file() {
+                    return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&light, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 2)?, false));
+                }
+            }
+            match ovc_ml::seg::VideoMatter::load(&rvm, 640, 360, tune().ratio, !cpu, 2) {
                 Ok(m) if m.backend == ovc_ml::seg::Backend::Gpu => return Ok(Engine::Rvm(m, is_best)),
                 // No usable graphics chip: the light model on the CPU.
-                Ok(_) if is_best => return Engine::load(modnet, false),
-                // CPU only: RVM at a quarter, about 10×/s.
-                Ok(_) => return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&rvm, 640, 360, 0.25, false, 2)?, false)),
+                Ok(_) if is_best => return Engine::load(modnet, false, true),
+                Ok(_) => return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&rvm, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 2)?, false)),
                 Err(e) => tracing::warn!("RVM: {e}; falling back to MODNet"),
             }
         }
-        let seg = ovc_ml::seg::PersonSegmenter::load(modnet, 512, 288, true, 2)?;
+        let seg = ovc_ml::seg::PersonSegmenter::load(modnet, 512, 288, !cpu, 2)?;
         if seg.backend == ovc_ml::seg::Backend::Gpu {
             return Ok(Engine::Modnet(seg));
         }
         Ok(Engine::Modnet(ovc_ml::seg::PersonSegmenter::load(modnet, 320, 192, false, 2)?))
+    }
+
+    /// Matte width: the GPU works at the full refine width, the CPU smaller.
+    fn width(&self) -> usize {
+        if self.gpu() {
+            tune().width
+        } else {
+            CPU_WIDTH.min(tune().width)
+        }
     }
 
     fn is_best(&self) -> bool {
@@ -587,9 +647,12 @@ fn shape(v: f32) -> f32 {
     t * t * (3.0 - 2.0 * t)
 }
 
-/// Matte resolution: 640 wide, frame aspect (even).
-fn refine_size(fw: u32, fh: u32) -> (usize, usize) {
-    let rw = tune().width.min(fw as usize) & !1;
+/// Matte width on the CPU.
+const CPU_WIDTH: usize = 448;
+
+/// Matte resolution: `width` wide (640 on a graphics chip), frame aspect (even).
+fn refine_size(fw: u32, fh: u32, width: usize) -> (usize, usize) {
+    let rw = width.min(fw as usize) & !1;
     let rh = ((rw as f32 * fh as f32 / fw as f32).round() as usize).max(2) & !1;
     (rw, rh)
 }
@@ -781,6 +844,9 @@ pub struct Compositor {
     pub blur: f32,
     /// Edge quality (`QUALITY_*`).
     pub quality: u8,
+    /// Hold each camera frame until its own matte is ready (only when mattes come at
+    /// camera speed; set from [`SegWorker::fast`]).
+    pub wait_for_matte: bool,
     /// Color key instead of AI: everything the color of `key` (a green screen, a plain
     /// wall) is background. `key_sim` = how close counts as that color, `key_smooth` = the
     /// soft edge width (both 0..1). `key_ai`: AI keeps the person solid even where clothes
@@ -818,6 +884,7 @@ impl Compositor {
             choice: Choice::Off,
             blur: 0.6,
             quality: QUALITY_AUTO,
+            wait_for_matte: false,
             key_mode: false,
             keys: vec![[0, 177, 64]],
             key_sim: 0.2,
