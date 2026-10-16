@@ -893,6 +893,8 @@ pub struct Compositor {
     ai_masks: Option<(Arc<Matte>, Vec<bool>, Vec<bool>)>,
     /// Alpha for every color (6 bits per channel) under the current key settings.
     key_lut: Option<((u32, u32), Vec<[u8; 3]>, Vec<u8>)>,
+    /// Share of the picture the color key removed in the last frame (0..1), for a warning.
+    pub keyed_share: f32,
     pub matte_src: Option<Mattes>,
     /// The picture background at frame size, for (choice, w, h).
     still: Option<(Choice, u32, u32, Vec<u8>)>,
@@ -923,6 +925,7 @@ impl Compositor {
             key_ai: true,
             ai_masks: None,
             key_lut: None,
+            keyed_share: 0.0,
             matte_src: None,
             still: None,
             video: None,
@@ -1207,6 +1210,7 @@ impl Compositor {
         let masks = ai.and(self.ai_masks.as_ref()).map(|(m, o, i)| (m.w as usize, m.h as usize, o, i));
         let lut = &self.key_lut.as_ref().expect("built above").2;
         self.alpha.resize(w * h, 0);
+        let mut removed = 0usize;
         for y in 0..h {
             let row = &src[y * w * 4..(y + 1) * w * 4];
             let arow = &mut self.alpha[y * w..(y + 1) * w];
@@ -1230,7 +1234,12 @@ impl Compositor {
                 let i = (row[o] as usize >> 2) << 12 | (row[o + 1] as usize >> 2) << 6 | row[o + 2] as usize >> 2;
                 *a = lut[i];
             }
+            if y % 8 == 0 {
+                removed += arow.iter().step_by(8).filter(|a| **a < 128).count();
+            }
         }
+        let sampled = (h.div_ceil(8) * w.div_ceil(8)).max(1);
+        self.keyed_share = removed as f32 / sampled as f32;
     }
 
     /// Bilinear enlargement of a small RGBA picture to `w`x`h` (into `out`).
@@ -1326,7 +1335,9 @@ fn ycc(c: [u8; 3]) -> (f32, f32, f32) {
 fn key_alpha_of(px: [u8; 3], k: &KeyRef, sim: f32, smooth: f32) -> u8 {
     // Brightness counts too (a green shirt is darker than the green wall): only the
     // screen's own shadows and bright spots stay "the same color".
-    let wl = if k.saturated { 0.25 } else { 0.6 };
+    // A white / grey / black wall has no hue to go by: brightness decides (and the little
+    // chroma a white wall has must match closely), or the whole room goes with it.
+    let wl = if k.saturated { 0.25 } else { 1.6 };
     let (py, pcb, pcr) = ycc(px);
     let dc = if k.saturated {
         // Very dark pixels have no reliable hue: count them as not the screen.
@@ -1337,11 +1348,11 @@ fn key_alpha_of(px: [u8; 3], k: &KeyRef, sim: f32, smooth: f32) -> u8 {
             ((pc.0 - k.chroma.0).powi(2) + (pc.1 - k.chroma.1).powi(2)).sqrt() * 3.0
         }
     } else {
-        ((pcb - k.cb).powi(2) + (pcr - k.cr).powi(2)).sqrt() / 128.0
+        ((pcb - k.cb).powi(2) + (pcr - k.cr).powi(2)).sqrt() / 48.0
     };
     let dl = wl * (py - k.y) / 255.0;
     let d = (dc * dc + dl * dl).sqrt();
-    let (lo, hi) = (sim.max(0.0), sim.max(0.0) + smooth.max(0.005));
+    let (lo, hi) = (sim.max(0.0), sim.max(0.0) + smooth.max(0.005) * 0.6);
     let t = ((d - lo) / (hi - lo)).clamp(0.0, 1.0);
     (t * t * (3.0 - 2.0 * t) * 255.0 + 0.5) as u8
 }

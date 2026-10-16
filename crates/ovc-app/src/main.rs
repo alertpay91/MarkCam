@@ -2930,6 +2930,9 @@ impl Studio {
                                         .on_hover_text("How close to the picked color still counts as background. Raise it until the wall is gone.");
                                     ui.add(egui::Slider::new(&mut fx.vbg.key_smooth, 0.0..=0.3).text("Edge softness").show_value(false))
                                         .on_hover_text("Width of the soft edge around you.");
+                                    if !fx.vbg.keys.is_empty() && fx.vbg.keyed_share > 0.75 && !fx.vbg.key_ai {
+                                        ui.label(egui::RichText::new("⚠ Almost the whole picture is removed: lower Similarity, Undo the last pick, or turn on AI helps.").small().color(theme::WARN));
+                                    }
                                     ui.checkbox(&mut fx.vbg.key_ai, "AI helps")
                                         .on_hover_text("Keeps you solid even where your clothes match the wall, and removes everything outside you (past the edge of the screen). Uses the graphics chip.");
                                 }
