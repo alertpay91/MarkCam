@@ -761,7 +761,7 @@ impl FaceWorker {
         } else {
             (dir.join(OLD_LANDMARKS), ovc_ml::face::Lmk::Insight106)
         };
-        let handle = thread::spawn({
+        let handle = thread::Builder::new().name("markcam-face".into()).spawn({
             let (want, run, landmarks, err) = (want.clone(), run.clone(), landmarks.clone(), err.clone());
             move || {
                 // ONNX Runtime runs Face Mesh ~5x faster than tract (tract is the fallback).
@@ -777,11 +777,15 @@ impl FaceWorker {
                 };
                 use std::time::{Duration, Instant};
                 let mut last_seq = u64::MAX;
-                let mut track = None;
+                let mut track: Option<ovc_ml::face::Track> = None;
                 let mut since_check = 0u32;
                 let mut last: Option<Vec<[f32; 2]>> = None;
                 let mut last_run = Instant::now();
                 let mut moving = true;
+                // A tiny picture of the face at the last model run, and when that was: an
+                // unchanged face reuses its points (a teacher sits still most of the time).
+                let mut face_thumb: Option<Vec<u8>> = None;
+                let mut model_at = Instant::now();
                 while run.load(Ordering::SeqCst) {
                     if !want.load(Ordering::SeqCst) {
                         track = None;
@@ -791,7 +795,9 @@ impl FaceWorker {
                     // While the head is still, ~12 updates/s look the same as 30 (masks are
                     // smoothed anyway) and cost less than half; when it moves, up to 25/s.
                     // No face in view: look for one 4 times a second.
-                    let interval = Duration::from_millis(if track.is_none() { 250 } else if moving { 40 } else { 80 });
+                    // Moving: up to 15 updates/s (stickers are smoothed in between); still: 8/s,
+                    // and most of those are skipped by the face check below.
+                    let interval = Duration::from_millis(if track.is_none() { 250 } else if moving { 66 } else { 125 });
                     let wait = interval.saturating_sub(last_run.elapsed());
                     if !wait.is_zero() {
                         thread::sleep(wait);
@@ -803,14 +809,27 @@ impl FaceWorker {
                             last_run = Instant::now();
                             // The detector only finds the face; after that the landmarks follow
                             // it, and the detector re-checks about once a second.
-                            let check = track.is_none() || since_check >= 12;
+                            // Same face as last time (and not too long ago): keep the points.
+                            if let (Some(t), false) = (track, since_check + 1 >= 24) {
+                                let thumb = face_luma(&data, w, h, t.crop());
+                                let same = face_thumb.as_ref().is_some_and(|p| {
+                                    p.len() == thumb.len() && p.iter().zip(&thumb).map(|(a, b)| a.abs_diff(*b) as u32).sum::<u32>() < thumb.len() as u32 * 3
+                                });
+                                if same && model_at.elapsed() < Duration::from_millis(1000) {
+                                    moving = false;
+                                    continue;
+                                }
+                            }
+                            let check = track.is_none() || since_check >= 24;
                             since_check = if check { 0 } else { since_check + 1 };
+                            model_at = Instant::now();
                             match tracker.track68(&data, w, h, track, check) {
                                 Ok(Some((l, t))) => {
                                     track = Some(t);
+                                    face_thumb = Some(face_luma(&data, w, h, t.crop()));
                                     // Largest point shift since the last update, normalized.
                                     moving = last.as_ref().map_or(true, |p| {
-                                        p.iter().zip(&l).map(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs())).fold(0.0, f32::max) > 0.006
+                                        p.iter().zip(&l).map(|(a, b)| (a[0] - b[0]).abs().max((a[1] - b[1]).abs())).fold(0.0, f32::max) > 0.01
                                     });
                                     last = Some(l.clone());
                                     *landmarks.lock().unwrap() = Some(l);
@@ -829,8 +848,28 @@ impl FaceWorker {
                 }
             }
         });
-        FaceWorker { want, run, landmarks, err, handle: Some(handle) }
+        FaceWorker { want, run, landmarks, err, handle: handle.ok() }
     }
+}
+
+/// A 16x16 gray picture of the face square (to tell whether the face changed).
+fn face_luma(rgba: &[u8], w: u32, h: u32, (cx, cy, side): (f32, f32, f32)) -> Vec<u8> {
+    const N: usize = 16;
+    let mut out = Vec::with_capacity(N * N);
+    let (wu, hu) = (w as usize, h as usize);
+    if wu == 0 || hu == 0 || rgba.len() < wu * hu * 4 {
+        return out;
+    }
+    let half = side * 0.35; // the inner face, not the hair / background around it
+    for j in 0..N {
+        let y = ((cy - half + (j as f32 + 0.5) / N as f32 * 2.0 * half) as isize).clamp(0, hu as isize - 1) as usize;
+        for i in 0..N {
+            let x = ((cx - half + (i as f32 + 0.5) / N as f32 * 2.0 * half) as isize).clamp(0, wu as isize - 1) as usize;
+            let p = (y * wu + x) * 4;
+            out.push(((rgba[p] as u32 * 77 + rgba[p + 1] as u32 * 150 + rgba[p + 2] as u32 * 29) >> 8) as u8);
+        }
+    }
+    out
 }
 
 impl Drop for FaceWorker {

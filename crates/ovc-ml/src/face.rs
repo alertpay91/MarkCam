@@ -87,7 +87,12 @@ impl FaceTracker {
         let shape = if kind == Lmk::FaceMesh { [1, s, s, 3] } else { [1, 3, s, s] };
         // ONNX Runtime, if `seg::init_runtime` was called (otherwise this just fails).
         let build = || -> ort::Result<ort::session::Session> {
-            ort::session::Session::builder()?.with_intra_op_spinning(false)?.with_inter_op_spinning(false)?.with_intra_threads(1)?.commit_from_file(lmk_path)
+            ort::session::Session::builder()?
+                .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)?
+                .with_intra_op_spinning(false)?
+                .with_inter_op_spinning(false)?
+                .with_intra_threads(1)?
+                .commit_from_file(lmk_path)
         };
         let lmk_ort = (kind == Lmk::FaceMesh).then(build).and_then(|r| r.ok()).map(std::sync::Mutex::new);
         let lmk = if lmk_ort.is_none() { Some(load_plan(lmk_path, &shape).context("load landmark model")?) } else { None };
@@ -263,6 +268,13 @@ pub struct Track {
     scale: f32,
     dx: f32,
     dy: f32,
+}
+
+impl Track {
+    /// The square the landmark model looks at next: center and side, in frame pixels.
+    pub fn crop(&self) -> (f32, f32, f32) {
+        (self.crop.cx, self.crop.cy, self.crop.side)
+    }
 }
 
 /// Center and spread (larger of width/height) of normalized points, in frame pixels.

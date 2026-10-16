@@ -270,8 +270,8 @@ fn worker(
     let gap_for = |e: &Engine, gpu: bool| {
         Duration::from_millis(match (e, gpu) {
             (Engine::Rvm(..), true) => 0,
-            // CPU: ~15 mattes a second (the frames in between use the nearest one).
-            _ => 66,
+            // CPU: ~10 mattes a second (the frames in between use the nearest one).
+            _ => 100,
         })
     };
     let mut min_gap = gap_for(&engine, gpu);
@@ -450,14 +450,14 @@ impl Engine {
                 // on a 7th-gen laptop.
                 let light = dir.join(RVM_MODEL);
                 if light.is_file() {
-                    return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&light, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 2)?, false));
+                    return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&light, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 1)?, false));
                 }
             }
             match ovc_ml::seg::VideoMatter::load(&rvm, 640, 360, tune().ratio, !cpu, 2) {
                 Ok(m) if m.backend == ovc_ml::seg::Backend::Gpu => return Ok(Engine::Rvm(m, is_best)),
                 // No usable graphics chip: the light model on the CPU.
                 Ok(_) if is_best => return Engine::load(modnet, false, true),
-                Ok(_) => return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&rvm, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 2)?, false)),
+                Ok(_) => return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&rvm, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 1)?, false)),
                 Err(e) => tracing::warn!("RVM: {e}; falling back to MODNet"),
             }
         }
@@ -648,7 +648,7 @@ fn shape(v: f32) -> f32 {
 }
 
 /// Matte width on the CPU.
-const CPU_WIDTH: usize = 448;
+const CPU_WIDTH: usize = 384;
 
 /// Matte resolution: `width` wide (640 on a graphics chip), frame aspect (even).
 fn refine_size(fw: u32, fh: u32, width: usize) -> (usize, usize) {
