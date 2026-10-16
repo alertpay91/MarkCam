@@ -2921,9 +2921,9 @@ impl Studio {
                                 ui.horizontal(|ui| {
                                     ui.label("Edge quality");
                                     for (q, name, tip) in [
-                                        (vbg::QUALITY_AUTO, "Auto", "Best when the graphics chip keeps up with the camera, else Light."),
-                                        (vbg::QUALITY_BEST, "Best", "The larger model: cleaner fingers and hands in motion. Needs a strong graphics chip."),
-                                        (vbg::QUALITY_LIGHT, "Light", "The small model: for laptops and longer battery life."),
+                                        (vbg::QUALITY_AUTO, "Auto", "Best on a strong graphics card; the fast model on laptops (built-in graphics)."),
+                                        (vbg::QUALITY_BEST, "Best", "The strongest model: finest edges, hands and hair. For a strong graphics card (on a laptop it runs on the processor and uses more of it)."),
+                                        (vbg::QUALITY_LIGHT, "Light", "The fast model (Google MediaPipe): smooth on any laptop, lowest CPU and battery use."),
                                     ] {
                                         ui.selectable_value(&mut fx.vbg.quality, q, name).on_hover_text(tip);
                                     }
@@ -4228,7 +4228,7 @@ impl Studio {
                     line(ui, "Emoji art: Noto Animated Emoji © Google (CC BY 4.0, resized and re-encoded); Fluent Emoji 3D © Microsoft (MIT).");
                     line(ui, "Fonts: Lilita One and Poppins (SIL Open Font License), Luckiest Guy (Apache 2.0).");
                     line(ui, "MarkCam Microphone uses VB-CABLE by VB-Audio Software — donationware; if you find it useful, support it at www.vb-cable.com.");
-                    line(ui, "Virtual background: Robust Video Matting (GPL-3.0), MODNet (Apache 2.0), ONNX Runtime (MIT), DirectML (Microsoft).");
+                    line(ui, "Virtual background: Robust Video Matting (GPL-3.0), MediaPipe Selfie Segmentation © Google (Apache 2.0), MODNet (Apache 2.0), ONNX Runtime (MIT), DirectML (Microsoft).");
                     line(ui, "Face tracking: MediaPipe Face Mesh © Google (Apache 2.0), Ultra-Light face detector (MIT).");
                     line(ui, "Video links and downloads: yt-dlp (Unlicense) and FFmpeg (GPL). Only download videos you are allowed to use.");
                     line(ui, "Full license texts are in the \"licenses\" folder next to MarkCam.exe.");

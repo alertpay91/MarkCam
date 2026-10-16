@@ -24,6 +24,9 @@ pub const MODEL: &str = "modnet_webcam.onnx";
 pub const RVM_MODEL: &str = "rvm_mobilenetv3_fp32.onnx";
 /// The larger, more accurate RVM (fingers, fast hands) for stronger graphics chips.
 pub const RVM_BEST_MODEL: &str = "rvm_resnet50_fp32.onnx";
+/// Google MediaPipe Selfie Segmentation (landscape, Apache-2.0): the fast model, for
+/// laptops and the "Light" edge quality.
+pub const SELFIE_MODEL: &str = "selfie_landscape.onnx";
 
 /// Edge quality choice: 0 = auto (best if the graphics chip keeps up), 1 = best, 2 = light.
 pub const QUALITY_AUTO: u8 = 0;
@@ -260,7 +263,7 @@ fn worker(
     ovc_ml::seg::init_runtime(&dir)?;
     let mut want_quality = quality.load(Ordering::SeqCst);
     let mut cpu_only = integrated_gpu || std::env::var_os("OVC_VBG_CPU").is_some();
-    let mut engine = Engine::load(&model, want_quality != QUALITY_LIGHT, cpu_only)?;
+    let mut engine = Engine::load_for(&model, want_quality, cpu_only)?;
     let mut gpu = engine.gpu();
     // Auto: the best model only while it keeps up with the camera (~30 fps).
     let mut best_checked = 0u32;
@@ -270,6 +273,8 @@ fn worker(
     let gap_for = |e: &Engine, gpu: bool| {
         Duration::from_millis(match (e, gpu) {
             (Engine::Rvm(..), true) => 0,
+            // The fast model: up to 20 mattes a second.
+            (Engine::Selfie(_), _) => 50,
             // CPU: ~10 mattes a second (the frames in between use the nearest one).
             _ => 100,
         })
@@ -289,7 +294,7 @@ fn worker(
         let q = quality.load(Ordering::SeqCst);
         if q != want_quality {
             want_quality = q;
-            engine = Engine::load(&model, q != QUALITY_LIGHT, cpu_only)?;
+            engine = Engine::load_for(&model, q, cpu_only)?;
             gpu = engine.gpu();
             min_gap = gap_for(&engine, gpu);
             gpu_probe.clear();
@@ -316,7 +321,7 @@ fn worker(
             if median > 45.0 {
                 tracing::warn!("graphics chip too slow for the background ({median:.0} ms): using the CPU");
                 cpu_only = true;
-                engine = Engine::load(&model, false, true)?;
+                engine = Engine::load_for(&model, want_quality, true)?;
                 gpu = engine.gpu();
                 min_gap = gap_for(&engine, gpu);
                 model_avg = 0.0;
@@ -377,14 +382,14 @@ fn worker(
             // OVC_VBG_GUIDED=1: also snap RVM's edges to the picture (experiment).
             Engine::Rvm(..) if std::env::var_os("OVC_VBG_GUIDED").is_some() => fast_guided_filter_rgb(&rgb, &raw, rw, rh, 4, 0.0015),
             Engine::Rvm(..) => raw,
-            Engine::Modnet(s) => refine(&raw, s.w, s.h, &rgb, rw, rh),
+            Engine::Modnet(s) | Engine::Selfie(s) => refine(&raw, s.w, s.h, &rgb, rw, rh),
         };
         let tp = Instant::now();
         keep_main_person(&mut q, rw, rh);
         prof[1] = tp.elapsed().as_secs_f32() * 1000.0;
         // MODNet works frame by frame: smooth it over time so edges don't shimmer. (RVM
         // has its own memory; smoothing would only make it lag.)
-        if let (Engine::Modnet(_), Some(p)) = (&engine, prev.as_ref().filter(|p| p.len() == q.len())) {
+        if let (Engine::Modnet(_) | Engine::Selfie(_), Some(p)) = (&engine, prev.as_ref().filter(|p| p.len() == q.len())) {
             for (a, b) in q.iter_mut().zip(p) {
                 let k = if (*a - *b).abs() > 0.3 { 0.85 } else { 0.6 };
                 *a = *a * k + *b * (1.0 - k);
@@ -434,9 +439,27 @@ enum Engine {
     /// RVM, and whether it is the best (ResNet50) one.
     Rvm(ovc_ml::seg::VideoMatter, bool),
     Modnet(ovc_ml::seg::PersonSegmenter),
+    /// MediaPipe Selfie Segmentation: tiny, every frame, edges snapped to the picture.
+    Selfie(ovc_ml::seg::PersonSegmenter),
 }
 
 impl Engine {
+    /// The engine for an edge quality: Light = the fast model; Best = RVM (the strong one on
+    /// a graphics chip, the light RVM on the CPU); Auto = Best on a real graphics chip,
+    /// the fast model on laptops (integrated graphics / no usable GPU).
+    fn load_for(modnet: &Path, quality: u8, cpu: bool) -> anyhow::Result<Engine> {
+        let selfie = modnet.parent().map(|d| d.join(SELFIE_MODEL)).filter(|p| p.is_file());
+        if quality == QUALITY_LIGHT || (quality == QUALITY_AUTO && cpu) {
+            if let Some(p) = &selfie {
+                match ovc_ml::seg::PersonSegmenter::load_selfie(p, 1) {
+                    Ok(s) => return Ok(Engine::Selfie(s)),
+                    Err(e) => tracing::warn!("selfie model: {e}"),
+                }
+            }
+        }
+        Engine::load(modnet, quality != QUALITY_LIGHT, cpu)
+    }
+
     /// `cpu`: don't try the graphics chip (integrated, or measured too slow).
     fn load(modnet: &Path, best: bool, cpu: bool) -> anyhow::Result<Engine> {
         let dir = modnet.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -470,6 +493,10 @@ impl Engine {
 
     /// Matte width: the GPU works at the full refine width, the CPU smaller.
     fn width(&self) -> usize {
+        if matches!(self, Engine::Selfie(_)) {
+            // Edges are snapped to the picture at this size: sharper than the model.
+            return SELFIE_WIDTH.min(tune().width);
+        }
         if self.gpu() {
             tune().width
         } else {
@@ -485,6 +512,7 @@ impl Engine {
         match self {
             Engine::Rvm(m, _) => m.backend == ovc_ml::seg::Backend::Gpu,
             Engine::Modnet(m) => m.backend == ovc_ml::seg::Backend::Gpu,
+            Engine::Selfie(_) => false,
         }
     }
 
@@ -493,6 +521,7 @@ impl Engine {
             Engine::Rvm(_, true) => "RVM (best)",
             Engine::Rvm(_, false) => "RVM (light)",
             Engine::Modnet(_) => "MODNet",
+            Engine::Selfie(_) => "Fast model (MediaPipe)",
         }
     }
 
@@ -532,7 +561,7 @@ impl Engine {
                 *self_fgr = Some(rgb8);
                 Ok(a)
             }
-            Engine::Modnet(s) => s.matte(rgba, fw, fh),
+            Engine::Modnet(s) | Engine::Selfie(s) => s.matte(rgba, fw, fh),
         }
     }
 }
@@ -649,6 +678,8 @@ fn shape(v: f32) -> f32 {
 
 /// Matte width on the CPU.
 const CPU_WIDTH: usize = 384;
+/// Edge refinement width for the fast model.
+const SELFIE_WIDTH: usize = 384;
 
 /// Matte resolution: `width` wide (640 on a graphics chip), frame aspect (even).
 fn refine_size(fw: u32, fh: u32, width: usize) -> (usize, usize) {

@@ -47,7 +47,7 @@ Copy-Item (Need "$root\target\release\markcam_dshow.dll") "$stage\markcam_dshow.
 Copy-Item (Need "$PSScriptRoot\README.txt") "$stage\README.txt"
 Copy-Item (Need "$root\LICENSE") "$stage\LICENSE.txt"
 Copy-Item (Need "$root\THIRD-PARTY-NOTICES.txt") "$stage\THIRD-PARTY-NOTICES.txt"
-foreach ($m in 'version-RFB-320.onnx', 'facemesh_v2.onnx', 'modnet_webcam.onnx', 'rvm_mobilenetv3_fp32.onnx', 'rvm_resnet50_fp32.onnx') { Copy-Item (Need "$data\models\$m") "$stage\models\" }
+foreach ($m in 'version-RFB-320.onnx', 'facemesh_v2.onnx', 'modnet_webcam.onnx', 'rvm_mobilenetv3_fp32.onnx', 'rvm_resnet50_fp32.onnx', 'selfie_landscape.onnx') { Copy-Item (Need "$data\models\$m") "$stage\models\" }
 # Virtual background: ONNX Runtime (MIT) + DirectML (Microsoft, redistributable) next to the
 # exe, and their licenses (with MODNet's, Apache-2.0) under licenses\.
 foreach ($d in 'onnxruntime.dll', 'onnxruntime_providers_shared.dll', 'DirectML.dll') { Copy-Item (Need "$data\runtime\$d") "$stage\" }

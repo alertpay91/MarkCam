@@ -6,6 +6,8 @@ Code and models (each under its own license; full texts in the "licenses" folder
 - DirectML — Microsoft, DirectML redistributable license.
 - Robust Video Matting (virtual background) — Shanchuan Lin et al., GPL-3.0.
 - MODNet (virtual background fallback) — ZHKKKe, Apache License 2.0.
+- MediaPipe Selfie Segmentation (fast virtual background, "Light") — Google, Apache License 2.0
+  (ONNX conversion: huggingface.co/onnx-community/mediapipe_selfie_segmentation_landscape).
 - MediaPipe Face Mesh V2 (face tracking) — Google, Apache License 2.0
   (ONNX conversion: huggingface.co/fernandotonon/QtMeshEditor-facemesh-onnx).
 - Ultra-Light-Fast-Generic-Face-Detector (version-RFB-320, face detection) — Linzaer, MIT License.

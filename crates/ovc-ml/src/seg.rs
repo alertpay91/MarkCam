@@ -171,6 +171,8 @@ fn downscale_chw(rgba: &[u8], fw: usize, fh: usize, w: usize, h: usize, out: &mu
 pub struct PersonSegmenter {
     session: Session,
     input_name: String,
+    /// Input in 0..1 (MediaPipe Selfie Segmentation) instead of -1..1 (MODNet).
+    unit_range: bool,
     /// Model input size (multiples of 32).
     pub w: usize,
     pub h: usize,
@@ -204,7 +206,19 @@ impl PersonSegmenter {
             _ => (build(false).context("load segmentation model")?, Backend::Cpu),
         };
         let input_name = session.inputs().first().map(|i| i.name().to_string()).unwrap_or_else(|| "input".into());
-        Ok(Self { session, input_name, w, h, backend, buf: vec![0.0; 3 * w * h] })
+        Ok(Self { session, input_name, unit_range: false, w, h, backend, buf: vec![0.0; 3 * w * h] })
+    }
+
+    /// Google MediaPipe Selfie Segmentation, landscape (Apache-2.0): 256x144 RGB 0..1 in,
+    /// a person mask out. Tiny (0.5 MB) and fast on any CPU (~2 ms on a desktop).
+    pub fn load_selfie(model: &Path, threads: usize) -> anyhow::Result<Self> {
+        let build = || -> ort::Result<Session> {
+            Session::builder()?.with_intra_op_spinning(false)?.with_inter_op_spinning(false)?.with_intra_threads(threads.max(1))?.commit_from_file(model)
+        };
+        let session: Session = build().map_err(|e| anyhow::anyhow!("{e}")).context("load selfie segmentation model")?;
+        let input_name = session.inputs().first().map(|i| i.name().to_string()).unwrap_or_else(|| "pixel_values".into());
+        let (w, h) = (256, 144);
+        Ok(Self { session, input_name, unit_range: true, w, h, backend: Backend::Cpu, buf: vec![0.0; 3 * w * h] })
     }
 
     /// Alpha matte (0..1, `self.w`x`self.h`, row-major) of the person in an RGBA frame.
@@ -233,7 +247,8 @@ impl PersonSegmenter {
                         b += rgba[i + 2] as u32;
                     }
                 }
-                let n = |v: u32| v as f32 / (4.0 * 127.5) - 1.0;
+                let unit = self.unit_range;
+                let n = |v: u32| if unit { v as f32 / (4.0 * 255.0) } else { v as f32 / (4.0 * 127.5) - 1.0 };
                 let i = y * w + x;
                 self.buf[i] = n(r);
                 self.buf[plane + i] = n(g);
