@@ -3403,8 +3403,8 @@ impl Studio {
                                     let mut v = ctl.voice.load(Ordering::Relaxed);
                                     for (m, name, tip) in [
                                         (voice::OFF, "Off", "Your microphone exactly as it is."),
-                                        (voice::LIGHT, "Light", "Removes steady noise (fan, air conditioning, hum, street) — RNNoise, almost no CPU."),
-                                        (voice::BEST, "Best", "Also keyboard, clicks and other sudden noises, more natural voice — DeepFilterNet, a little more CPU."),
+                                        (voice::LIGHT, "Light (recommended)", "Natural and steady: removes fan, air conditioning, hum and street noise — RNNoise, almost no CPU."),
+                                        (voice::BEST, "Best", "Removes more (also keyboard and clicks in pauses) — DeepFilterNet, a little more CPU. On a strong setting the room can come back audibly when you start talking."),
                                     ] {
                                         ui.selectable_value(&mut v, m, name).on_hover_text(tip);
                                     }

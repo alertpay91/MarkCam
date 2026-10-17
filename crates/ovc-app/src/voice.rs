@@ -36,10 +36,15 @@ const FRAME: usize = 480;
 /// (cleans what is left in loud noise; 0 = off). Stronger takes out louder typing but can
 /// color the voice when the noise is loud.
 const STRENGTHS: [(f32, f32); 5] = [(15.0, 0.0), (22.0, 0.0), (30.0, 0.0), (40.0, 0.02), (55.0, 0.04)];
+/// Best is gentler: DeepFilterNet takes the room down so far in pauses that it audibly comes
+/// back with the voice ("breathing", heard as a rustle when you start talking). A smaller
+/// gap between pause and speech keeps it natural; the post-filter only on Strong.
+const STRENGTHS_BEST: [(f32, f32); 5] = [(12.0, 0.0), (16.0, 0.0), (20.0, 0.0), (26.0, 0.0), (34.0, 0.02)];
 pub const DEFAULT_STRENGTH: u8 = 3;
 
-fn strength(level: u8) -> (f32, f32) {
-    STRENGTHS[(level.clamp(1, 5) - 1) as usize]
+fn strength(mode: u8, level: u8) -> (f32, f32) {
+    let table = if mode == BEST { &STRENGTHS_BEST } else { &STRENGTHS };
+    table[(level.clamp(1, 5) - 1) as usize]
 }
 
 enum Denoiser {
@@ -343,7 +348,7 @@ pub struct Voice {
 impl Voice {
     /// `mode`: [`LIGHT`] or [`BEST`] (Best falls back to Light if its model can't load).
     pub fn new(mode: u8, level: u8) -> Self {
-        let (atten_db, beta) = strength(level);
+        let (atten_db, beta) = strength(mode, level);
         let denoise = if mode == BEST {
             let rp = df::tract::RuntimeParams::default_with_ch(1).with_atten_lim(100.0).with_post_filter(beta);
             match df::tract::DfTract::new(df::tract::DfParams::default(), &rp) {
@@ -393,7 +398,7 @@ impl Voice {
         if level == self.level {
             return;
         }
-        let (atten_db, beta) = strength(level);
+        let (atten_db, beta) = strength(self.mode, level);
         self.level = level;
         self.atten_db = atten_db;
         self.clicks.set_level(level);
@@ -452,9 +457,11 @@ impl Voice {
                 // DeepFilterNet outputs hard zeros for input below -70 dB and jumps back when
                 // a sound comes: in a quiet room that turns every mouse click into a pop. A
                 // faint hiss (-66 dB, removed by the model itself) keeps it running smoothly.
-                for v in self.frame_in.iter_mut() {
-                    self.dither = self.dither.wrapping_mul(1664525).wrapping_add(1013904223);
-                    *v += ((self.dither >> 9) as f32 / (1 << 23) as f32 - 0.5) * 1.7e-3;
+                if !(cfg!(test) && std::env::var_os("OVC_NO_DITHER").is_some()) {
+                    for v in self.frame_in.iter_mut() {
+                        self.dither = self.dither.wrapping_mul(1664525).wrapping_add(1013904223);
+                        *v += ((self.dither >> 9) as f32 / (1 << 23) as f32 - 0.5) * 1.7e-3;
+                    }
                 }
                 let noisy = ndarray::ArrayView2::from_shape((1, FRAME), &self.frame_in[..]).expect("frame shape");
                 let mut enh = ndarray::Array2::<f32>::zeros((1, FRAME));
@@ -464,7 +471,9 @@ impl Voice {
                 }
             }
         }
-        self.guard.run(&dry, &mut self.frame_out);
+        if !(cfg!(test) && std::env::var_os("OVC_NO_GUARD").is_some()) {
+            self.guard.run(&dry, &mut self.frame_out);
+        }
         // Never lower the noise by more than the limit: a little of the room stays, so
         // pauses don't fall into dead silence (that sounds like a gate).
         let floor = 10f32.powf(-self.atten_db / 20.0);
@@ -687,6 +696,8 @@ mod tests {
         let (mut pk_talk, mut pk_pause, mut n_talk, mut n_pause) = (0f32, 0f32, 0, 0);
         let (mut pause_in, mut pause_out) = (0f32, 0f32);
         let (mut cons_in, mut cons_out) = (0f32, 0f32);
+        let (rh, oh) = (band(&r, 8000.0, 16000.0), band(&o, 8000.0, 16000.0));
+        let (mut hiss_in, mut hiss_out) = (0f32, 0f32);
         println!(" time  voice in/out   clicks in/out  crest  ");
         for i in 0..n {
             let rg = i * blk..(i + 1) * blk;
@@ -714,6 +725,8 @@ mod tests {
                 }
             }
             if voiced && !click {
+                hiss_in += 10f32.powf(db(&rh[rg.clone()]) / 10.0);
+                hiss_out += 10f32.powf(db(&oh[rg.clone()]) / 10.0);
                 cons_in += 10f32.powf(ci / 10.0);
                 cons_out += 10f32.powf(co / 10.0);
             }
@@ -750,6 +763,7 @@ mod tests {
             d(pause_in, pause_out),
             d(cons_in, cons_out)
         );
+        println!("8-16 kHz while talking: in {:.1} dB, out {:.1} dB", 10.0 * hiss_in.max(1e-12).log10(), 10.0 * hiss_out.max(1e-12).log10());
         println!("voiced speech ({voiced_n} blocks): {:+.1} dB, {voiced_lost} blocks lost more than 4 dB", d(voiced_in, voiced_out));
     }
 
