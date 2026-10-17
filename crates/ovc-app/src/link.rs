@@ -40,8 +40,9 @@ fn format_args(max_h: u32) -> [String; 4] {
     ["-f".into(), "bv*+ba/b".into(), "-S".into(), format!("res:{max_h},vcodec:h264,fps:30")]
 }
 
-/// Stream URLs for a page link: one (video+audio) or two (video, audio).
-fn resolve(url: &str, max_h: u32) -> anyhow::Result<Vec<String>> {
+/// Stream URLs for a page link: one (video+audio) or two (video, audio), and the HTTP
+/// headers yt-dlp used to get them (YouTube can refuse a request that looks different).
+fn resolve(url: &str, max_h: u32) -> anyhow::Result<Input> {
     match resolve_once(url, max_h) {
         // YouTube changed something: update yt-dlp and try once more.
         Err(_) if crate::tools::update_ytdlp(true) => resolve_once(url, max_h),
@@ -49,9 +50,9 @@ fn resolve(url: &str, max_h: u32) -> anyhow::Result<Vec<String>> {
     }
 }
 
-fn resolve_once(url: &str, max_h: u32) -> anyhow::Result<Vec<String>> {
+fn resolve_once(url: &str, max_h: u32) -> anyhow::Result<Input> {
     let out = hidden(Command::new(crate::tools::ytdlp()).args([
-        "-g",
+        "-J",
         "--no-playlist",
         "--no-warnings",
     ])
@@ -63,12 +64,32 @@ fn resolve_once(url: &str, max_h: u32) -> anyhow::Result<Vec<String>> {
         let line = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("unknown error");
         anyhow::bail!("can't open this link: {}", line.trim_start_matches("ERROR: "));
     }
+    let info: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| anyhow::anyhow!("can't open this link: {e}"))?;
+    let formats = match info.get("requested_formats").and_then(|f| f.as_array()) {
+        Some(f) if !f.is_empty() => f.clone(),
+        _ => vec![info.clone()],
+    };
     let urls: Vec<String> =
-        String::from_utf8_lossy(&out.stdout).lines().map(str::trim).filter(|l| l.starts_with("http")).map(String::from).collect();
+        formats.iter().filter_map(|f| f.get("url")?.as_str()).filter(|u| u.starts_with("http")).map(String::from).collect();
     if urls.is_empty() {
         anyhow::bail!("no playable stream found for this link");
     }
-    Ok(urls)
+    let headers = formats
+        .first()
+        .and_then(|f| f.get("http_headers")?.as_object().cloned())
+        .map(|h| h.into_iter().filter_map(|(k, v)| Some((k, v.as_str()?.to_string()))).collect())
+        .unwrap_or_default();
+    Ok(Input::Urls { urls, headers })
+}
+
+/// What ffmpeg reads.
+#[derive(Clone)]
+enum Input {
+    /// Files or stream URLs (with the headers to send for URLs).
+    Urls { urls: Vec<String>, headers: Vec<(String, String)> },
+    /// yt-dlp downloads the page's video itself and pipes it into ffmpeg — for when the
+    /// site refuses ffmpeg (YouTube "403 Forbidden" on some networks).
+    ViaYtdlp { page: String, max_h: u32 },
 }
 
 /// The folder picked in Setup, if any.
@@ -269,6 +290,8 @@ pub fn seek(to: f64) {
 /// One running ffmpeg: frames into a queue, sound to the mixer.
 struct Running {
     child: Child,
+    /// yt-dlp feeding ffmpeg (the fallback).
+    helper: Option<Child>,
     frames: Arc<FrameQueue>,
     stop: Arc<AtomicBool>,
     /// Parsed from ffmpeg's input info.
@@ -283,11 +306,17 @@ impl Drop for Running {
         self.frames.cv.notify_all();
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(h) = self.helper.as_mut() {
+            let _ = h.kill();
+            let _ = h.wait();
+        }
     }
 }
 
 pub struct LinkSource {
-    inputs: Vec<String>,
+    inputs: Input,
+    /// The page link and quality, if this is one (for the yt-dlp fallback).
+    page: Option<(String, u32)>,
     looped: bool,
     run: Option<Running>,
     format: VideoFormat,
@@ -308,16 +337,23 @@ pub struct LinkSource {
 impl LinkSource {
     /// A page link (YouTube…), resolved with yt-dlp, at most `max_h` lines.
     pub fn open_url(url: &str, max_h: u32) -> anyhow::Result<Self> {
-        let urls = resolve(url, max_h)?;
-        Self::new(urls, false)
+        // Test hook: OVC_TEST_VIA_YTDLP=1 starts with the yt-dlp fallback.
+        let input = if std::env::var_os("OVC_TEST_VIA_YTDLP").is_some() {
+            Input::ViaYtdlp { page: url.to_string(), max_h }
+        } else {
+            resolve(url, max_h)?
+        };
+        let mut s = Self::new(input, false)?;
+        s.page = Some((url.to_string(), max_h));
+        Ok(s)
     }
 
     /// A local video file, looping.
     pub fn open_file(path: &Path) -> anyhow::Result<Self> {
-        Self::new(vec![path.to_string_lossy().into_owned()], true)
+        Self::new(Input::Urls { urls: vec![path.to_string_lossy().into_owned()], headers: Vec::new() }, true)
     }
 
-    fn new(inputs: Vec<String>, looped: bool) -> anyhow::Result<Self> {
+    fn new(inputs: Input, looped: bool) -> anyhow::Result<Self> {
         let run = spawn(&inputs, looped, 0.0)?;
         let owner = NEXT_OWNER.fetch_add(1, Ordering::SeqCst);
         *PLAYBACK.lock().unwrap() =
@@ -325,6 +361,7 @@ impl LinkSource {
         let format = VideoFormat { format: PixelFormat::Rgba8, width: W, height: H, fps_num: FPS, fps_den: 1 };
         Ok(LinkSource {
             inputs,
+            page: None,
             looped,
             run: Some(run),
             format,
@@ -376,20 +413,54 @@ impl LinkSource {
     }
 }
 
-fn spawn(inputs: &[String], looped: bool, at: f64) -> anyhow::Result<Running> {
+fn spawn(input: &Input, looped: bool, at: f64) -> anyhow::Result<Running> {
     // Audio arrives on a local socket ffmpeg connects to.
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
 
+    // yt-dlp as the downloader: its output is ffmpeg's input.
+    let mut helper: Option<Child> = None;
+    let (pipe_in, piped): (Vec<String>, bool) = match input {
+        Input::Urls { urls, .. } => (urls.clone(), false),
+        Input::ViaYtdlp { page, max_h } => {
+            let mut y = Command::new(crate::tools::ytdlp());
+            y.args(["-q", "--no-warnings", "--no-playlist", "--no-part", "-f", &format!("b[height<={max_h}]/b"), "-o", "-"])
+                .arg(page)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            helper = Some(hidden(&mut y).spawn()?);
+            (vec!["pipe:0".to_string()], true)
+        }
+    };
+    let headers: &[(String, String)] = match input {
+        Input::Urls { headers, .. } => headers,
+        Input::ViaYtdlp { .. } => &[],
+    };
+    let inputs = &pipe_in;
+
     let mut cmd = Command::new(crate::tools::ffmpeg());
     // "info" only for the input description (the duration); -nostats keeps it quiet after.
-    cmd.args(["-hide_banner", "-loglevel", "info", "-nostats", "-nostdin"]);
+    cmd.args(["-hide_banner", "-loglevel", "info", "-nostats"]);
+    if !piped {
+        cmd.arg("-nostdin");
+    }
     for i in inputs {
-        if looped {
+        if looped && !piped {
             cmd.args(["-stream_loop", "-1"]);
         }
         if i.starts_with("http") {
-            cmd.args(["-user_agent", "Mozilla/5.0", "-reconnect", "1", "-reconnect_streamed", "1"]);
+            // The same identity yt-dlp used to get the URL.
+            let ua = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("user-agent")).map_or("Mozilla/5.0", |(_, v)| v.as_str());
+            cmd.args(["-user_agent", ua, "-reconnect", "1", "-reconnect_streamed", "1"]);
+            let extra: String = headers
+                .iter()
+                .filter(|(k, _)| !k.eq_ignore_ascii_case("user-agent"))
+                .map(|(k, v)| format!("{k}: {v}\r\n"))
+                .collect();
+            if !extra.is_empty() {
+                cmd.args(["-headers", &extra]);
+            }
         }
         if at > 0.05 {
             cmd.args(["-ss", &format!("{at:.2}")]);
@@ -408,7 +479,7 @@ fn spawn(inputs: &[String], looped: bool, at: f64) -> anyhow::Result<Running> {
     let audio_input = if inputs.len() > 1 { "1:a:0?" } else { "0:a:0?" };
     // ffmpeg refuses to start when an output gets no stream, so a file without sound
     // (many clips and effect videos) needs the audio output left out.
-    let with_audio = inputs.len() > 1 || inputs.first().is_some_and(|i| i.starts_with("http") || has_audio(i));
+    let with_audio = piped || inputs.len() > 1 || inputs.first().is_some_and(|i| i.starts_with("http") || has_audio(i));
     cmd.args([
         "-map",
         "0:v:0",
@@ -433,7 +504,11 @@ fn spawn(inputs: &[String], looped: bool, at: f64) -> anyhow::Result<Running> {
             &format!("tcp://127.0.0.1:{port}"),
         ]);
     }
-    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let stdin = match helper.as_mut().and_then(|h| h.stdout.take()) {
+        Some(out) => Stdio::from(out),
+        None => Stdio::null(),
+    };
+    cmd.stdin(stdin).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = hidden(&mut cmd).spawn()?;
     let video = child.stdout.take().ok_or_else(|| anyhow::anyhow!("no video pipe"))?;
     let stop = Arc::new(AtomicBool::new(false));
@@ -511,7 +586,7 @@ fn spawn(inputs: &[String], looped: bool, at: f64) -> anyhow::Result<Running> {
         }
     });
 
-    Ok(Running { child, frames, stop, duration, last_msg })
+    Ok(Running { child, helper, frames, stop, duration, last_msg })
 }
 
 /// Whether a local media file has a sound track (ffmpeg lists its streams, then stops
@@ -635,6 +710,16 @@ impl CaptureSource for LinkSource {
                     return Ok(None);
                 }
                 let msg = self.run.as_ref().map(|r| r.last_msg.lock().unwrap().clone()).unwrap_or_default();
+                // The site refused ffmpeg (YouTube "403 Forbidden"): let yt-dlp fetch it.
+                if self.shown == 0 && msg.contains("403") && !matches!(self.inputs, Input::ViaYtdlp { .. }) {
+                    if let Some((page, max_h)) = self.page.clone() {
+                        tracing::warn!("stream refused ({msg}): yt-dlp downloads it instead");
+                        self.inputs = Input::ViaYtdlp { page, max_h };
+                        self.run = None;
+                        self.restart(self.offset)?;
+                        return Ok(None);
+                    }
+                }
                 if self.shown == 0 && !msg.is_empty() {
                     anyhow::bail!("the video could not be played: {msg}");
                 }

@@ -391,7 +391,25 @@ fn worker(
         prof[0] = tp.elapsed().as_secs_f32() * 1000.0;
         let tm = Instant::now();
         let mut fgr = None;
-        let raw = engine.matte(&rgba, fw, fh, &rgb, rw, rh, &mut fgr)?;
+        let raw = match engine.matte(&rgba, fw, fh, &rgb, rw, rh, &mut fgr) {
+            Ok(r) => r,
+            // The graphics chip's driver can't run the model (DirectML errors on some Intel
+            // laptops, e.g. "Mul_139 … 80070057"): the CPU, for good.
+            Err(e) if gpu => {
+                tracing::warn!("background model failed on the graphics chip ({e}): using the CPU");
+                cpu_only = true;
+                engine = Engine::load_for(&model, want_quality, true)?;
+                gpu = engine.gpu();
+                min_gap = gap_for(&engine, gpu);
+                gpu_probe.clear();
+                model_avg = 0.0;
+                ms_avg = 0.0;
+                prev = None;
+                last_size = (0, 0);
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         let t_model = tm.elapsed();
         let mut q = match &engine {
             // RVM refines its own edges at this size (a learned guided filter).
@@ -559,6 +577,10 @@ impl Engine {
         self_fgr: &mut Option<Vec<u8>>,
     ) -> anyhow::Result<Vec<f32>> {
         *self_fgr = None;
+        // Test hook: act like a graphics driver that can't run the model (OVC_TEST_GPU_FAIL=1).
+        if self.gpu() && std::env::var_os("OVC_TEST_GPU_FAIL").is_some() {
+            anyhow::bail!("simulated graphics driver failure");
+        }
         match self {
             Engine::Rvm(m, _) => {
                 if (m.w, m.h) != (rw, rh) {
