@@ -22,12 +22,24 @@ pub const CH: usize = 2;
 /// Name given to the virtual cable's microphone end (what apps list).
 /// Public builds keep VB-CABLE in the name (VB-Audio's donationware terms: users must be
 /// able to see it is their cable).
-pub const MIC_NAME: &str = if crate::PUBLIC { "MarkCam Microphone (VB-CABLE)" } else { "MarkCam Microphone" };
+/// (Linux: MarkCam's own PulseAudio / PipeWire virtual microphone, no VB-CABLE.)
+pub const MIC_NAME: &str = if crate::PUBLIC && cfg!(windows) { "MarkCam Microphone (VB-CABLE)" } else { "MarkCam Microphone" };
 /// Name given to the cable's speaker end (MarkCam writes into it; not for apps — it can't be
 /// removed, the microphone is its other end).
 pub const OUT_NAME: &str = "MarkCam Mic Feed (not a speaker)";
-/// Every VB-CABLE endpoint's name ends with this (also after renaming).
-const CABLE_TAG: &str = "VB-Audio Virtual Cable";
+/// Every VB-CABLE endpoint's name ends with this (also after renaming); on Linux both ends
+/// of MarkCam's virtual microphone carry "MarkCam".
+const CABLE_TAG: &str = if cfg!(windows) { "VB-Audio Virtual Cable" } else { "MarkCam" };
+
+/// The microphone choice that follows the system's.
+pub const DEFAULT_MIC: &str = if cfg!(windows) { "Windows default" } else { "System default" };
+/// The setup card's note and button.
+pub const SETUP_NOTE: &str = if cfg!(windows) {
+    "One-time install (admin): MarkCam sets up the free VB-CABLE virtual audio cable and names it MarkCam Microphone."
+} else {
+    "One click, no driver and no password: MarkCam creates a virtual microphone in PulseAudio / PipeWire (and again by itself after a restart)."
+};
+pub const SETUP_BUTTON: &str = if cfg!(windows) { "Install MarkCam Microphone" } else { "Create MarkCam Microphone" };
 
 // ── Sound from the playing video / link (pushed by the player) ──────────────────────────
 
@@ -67,6 +79,10 @@ pub fn microphones() -> Vec<Device> {
 
 /// The virtual cable's endpoints `(microphone end, speaker end)`, if installed.
 pub fn cable() -> Option<(Device, Device)> {
+    // Linux: the virtual microphone lives until the sound server restarts (a reboot);
+    // once set up, MarkCam brings it back by itself.
+    #[cfg(not(windows))]
+    imp::restore_cable();
     let mic = imp::list(true).into_iter().find(|d| d.name.contains(CABLE_TAG))?;
     let out = imp::list(false).into_iter().find(|d| d.name.contains(CABLE_TAG))?;
     Some((mic, out))
@@ -205,6 +221,17 @@ impl Setup {
     pub fn start(rename_only: bool) -> Self {
         let status = Arc::new(Mutex::new("starting…".to_string()));
         let active = Arc::new(AtomicBool::new(true));
+        #[cfg(not(windows))]
+        {
+            let _ = rename_only;
+            *status.lock().unwrap() = match imp::create_cable() {
+                Ok(()) => "MarkCam Microphone is ready".into(),
+                Err(e) => format!("setup failed: {e}"),
+            };
+            active.store(false, Ordering::SeqCst);
+            return Setup { status, active };
+        }
+        #[allow(unreachable_code)]
         std::thread::spawn({
             let (status, active) = (status.clone(), active.clone());
             move || {
@@ -254,6 +281,7 @@ impl Setup {
 /// nothing is heard). Put real devices back: a headset / speakers / headphones if there
 /// is one, else the first real device. Returns what was fixed.
 pub fn fix_defaults() -> Vec<String> {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut fixed = Vec::new();
     #[cfg(windows)]
     {
@@ -782,19 +810,242 @@ mod imp {
     }
 }
 
+/// Linux: PulseAudio's API (PipeWire serves it too, as on Linux Mint 22). The virtual
+/// microphone is a null sink "MarkCam Mic Feed" (MarkCam plays the mix into it) whose
+/// monitor is remapped into a proper microphone, "MarkCam Microphone".
 #[cfg(not(windows))]
 mod imp {
     use super::*;
-    pub fn list(_: bool) -> Vec<Device> {
-        Vec::new()
+    use libpulse_binding::def::BufferAttr;
+    use libpulse_binding::sample::{Format, Spec};
+    use libpulse_binding::stream::Direction;
+    use libpulse_simple_binding::Simple;
+    use std::process::Command;
+
+    const FEED: &str = "markcam_feed";
+    const MIC: &str = "markcam_mic";
+
+    /// Marker: the user created the virtual microphone (so it comes back after a reboot).
+    fn marker() -> std::path::PathBuf {
+        crate::settings::app_dir().join("virtual-microphone")
     }
+
+    fn pactl(args: &[&str]) -> Option<String> {
+        let out = Command::new("pactl").env("LC_ALL", "C").args(args).output().ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// `pactl list sources|sinks`: (name, description, is a monitor).
+    fn entries(kind: &str) -> Vec<(String, String, bool)> {
+        let Some(text) = pactl(&["list", kind]) else { return Vec::new() };
+        let mut v = Vec::new();
+        let (mut name, mut desc, mut monitor) = (None::<String>, None::<String>, false);
+        let flush = |v: &mut Vec<(String, String, bool)>, name: &mut Option<String>, desc: &mut Option<String>, monitor: &mut bool| {
+            if let Some(n) = name.take() {
+                let d = desc.take().unwrap_or_else(|| n.clone());
+                v.push((n, d, *monitor));
+            }
+            *desc = None;
+            *monitor = false;
+        };
+        for line in text.lines() {
+            let l = line.trim();
+            if l.starts_with("Source #") || l.starts_with("Sink #") {
+                flush(&mut v, &mut name, &mut desc, &mut monitor);
+            } else if let Some(n) = l.strip_prefix("Name: ") {
+                name = Some(n.to_string());
+            } else if let Some(d) = l.strip_prefix("Description: ") {
+                desc = Some(d.to_string());
+            } else if let Some(m) = l.strip_prefix("Monitor of Sink: ") {
+                monitor = m != "n/a";
+            }
+        }
+        flush(&mut v, &mut name, &mut desc, &mut monitor);
+        v
+    }
+
+    pub fn list(capture: bool) -> Vec<Device> {
+        entries(if capture { "sources" } else { "sinks" })
+            .into_iter()
+            .filter(|(_, _, monitor)| !monitor)
+            .map(|(id, name, _)| Device { id, name })
+            .collect()
+    }
+
+    fn exists(kind: &str, name: &str) -> bool {
+        pactl(&["list", "short", kind]).is_some_and(|t| t.lines().any(|l| l.split('\t').nth(1) == Some(name)))
+    }
+
+    /// Create the virtual microphone (keeps the user's default speakers / microphone).
+    pub fn create_cable() -> anyhow::Result<()> {
+        if pactl(&["info"]).is_none() {
+            anyhow::bail!("no sound server (PulseAudio / PipeWire) answers — is pulseaudio-utils installed?");
+        }
+        let (spk, mic) = (pactl(&["get-default-sink"]), pactl(&["get-default-source"]));
+        if !exists("sinks", FEED) {
+            // (Quoted twice: PipeWire's parser needs the outer quotes for names with spaces.)
+            let props = format!("sink_properties='device.description=\"{OUT_NAME}\"'");
+            pactl(&["load-module", "module-null-sink", &format!("sink_name={FEED}"), "rate=48000", "channels=2", &props])
+                .ok_or_else(|| anyhow::anyhow!("could not create the feed (pactl load-module module-null-sink)"))?;
+        }
+        if !exists("sources", MIC) {
+            let props = format!("source_properties='device.description=\"{MIC_NAME}\"'");
+            pactl(&["load-module", "module-remap-source", &format!("master={FEED}.monitor"), &format!("source_name={MIC}"), &props])
+                .ok_or_else(|| anyhow::anyhow!("could not create the microphone (pactl load-module module-remap-source)"))?;
+        }
+        // A new device can take over as the default: put the user's back.
+        if let Some(s) = spk.map(|s| s.trim().to_string()).filter(|s| !s.is_empty() && s != FEED) {
+            let _ = pactl(&["set-default-sink", &s]);
+        }
+        if let Some(m) = mic.map(|m| m.trim().to_string()).filter(|m| !m.is_empty() && m != MIC) {
+            let _ = pactl(&["set-default-source", &m]);
+        }
+        let _ = std::fs::create_dir_all(crate::settings::app_dir());
+        let _ = std::fs::write(marker(), b"");
+        Ok(())
+    }
+
+    /// After a reboot: bring the virtual microphone back if the user created it before.
+    pub fn restore_cable() {
+        static DONE: std::sync::Once = std::sync::Once::new();
+        DONE.call_once(|| {
+            if marker().is_file() && !exists("sources", MIC) {
+                let _ = create_cable();
+            }
+        });
+    }
+
     pub fn rename_cable() -> anyhow::Result<()> {
-        anyhow::bail!("Windows only")
+        Ok(())
     }
     pub fn hide_extra_outputs() -> anyhow::Result<usize> {
         Ok(0)
     }
-    pub fn run(_: &Controls, _: Option<&str>, _: bool, _: &AtomicBool, _: &Mutex<String>) -> anyhow::Result<()> {
-        anyhow::bail!("audio is Windows-only for now")
+
+    fn spec() -> Spec {
+        Spec { format: Format::F32le, channels: CH as u8, rate: RATE }
+    }
+
+    /// 10 ms blocks; about `ms` queued on an output.
+    fn attr(ms: u32) -> BufferAttr {
+        let bytes = |ms: u32| RATE * CH as u32 * 4 * ms / 1000;
+        BufferAttr { maxlength: u32::MAX, tlength: bytes(ms), prebuf: u32::MAX, minreq: bytes(10), fragsize: bytes(10) }
+    }
+
+    fn as_bytes(s: &[f32]) -> &[u8] {
+        // SAFETY: f32 has no padding; the slice is reinterpreted, not copied.
+        unsafe { std::slice::from_raw_parts(s.as_ptr() as *const u8, std::mem::size_of_val(s)) }
+    }
+
+    /// Write unless the output is already >120 ms behind (then this block is dropped, so a
+    /// slower clock never piles up delay).
+    fn feed(out: &Simple, block: &[f32]) {
+        let behind_ms = out.get_latency().map(|l| l.0 / 1000).unwrap_or(0);
+        if behind_ms < 120 {
+            let _ = out.write(as_bytes(block));
+        }
+    }
+
+    pub fn run(c: &Controls, mic_id: Option<&str>, to_cable: bool, stop: &AtomicBool, status: &Mutex<String>) -> anyhow::Result<()> {
+        let spec = spec();
+        let mut problems: Vec<String> = Vec::new();
+        let cable = if to_cable {
+            Simple::new(None, "MarkCam", Direction::Playback, Some(FEED), "MarkCam Microphone", &spec, None, Some(&attr(40)))
+                .map_err(|e| problems.push(format!("MarkCam Microphone: {e}")))
+                .ok()
+        } else {
+            None
+        };
+        // MarkCam's own devices as the system defaults (e.g. no other sound device) would
+        // feed the mix back into itself: then a real device is picked, or none.
+        let ours = |s: Option<String>| s.is_some_and(|s| s.trim().starts_with("markcam"));
+        let mic = if cable.is_some() {
+            // `Some(None)` = the system default.
+            let dev: Option<Option<String>> = match mic_id {
+                Some(id) => Some(Some(id.to_string())),
+                None if ours(pactl(&["get-default-source"])) => super::microphones().into_iter().next().map(|d| Some(d.id)),
+                None => Some(None),
+            };
+            match dev {
+                Some(dev) => Simple::new(None, "MarkCam", Direction::Record, dev.as_deref(), "Microphone", &spec, None, Some(&attr(40)))
+                    .map_err(|e| problems.push(format!("microphone: {e}")))
+                    .ok(),
+                None => None,
+            }
+        } else {
+            None
+        };
+        let spk = if ours(pactl(&["get-default-sink"])) {
+            None
+        } else {
+            Simple::new(None, "MarkCam", Direction::Playback, None, "Video sound", &spec, None, Some(&attr(60)))
+                .map_err(|e| problems.push(format!("headphones: {e}")))
+                .ok()
+        };
+        let mut line = match (&cable, &mic, to_cable) {
+            (Some(_), Some(_), _) => "running: your voice + video sound → MarkCam Microphone".to_string(),
+            (Some(_), None, _) => "running: video sound → MarkCam Microphone (microphone not available)".to_string(),
+            (None, _, true) => "MarkCam Microphone could not be opened".to_string(),
+            (None, _, false) => "running: video sound on your headphones".to_string(),
+        };
+        if spk.is_none() {
+            line.push_str(" · headphones not available");
+        }
+        if !problems.is_empty() {
+            line.push_str(&format!(" · problems: {}", problems.join("; ")));
+        }
+        *status.lock().unwrap() = line;
+
+        let n = (RATE as usize / 100) * CH; // 10 ms
+        let mut micv = vec![0f32; n];
+        let mut out = vec![0f32; n];
+        let mut mon = vec![0f32; n];
+        let mut tick = std::time::Instant::now();
+        while !stop.load(Ordering::SeqCst) {
+            // The microphone's clock paces the loop; without one, a 10 ms timer does.
+            let have_mic = match &mic {
+                Some(m) => {
+                    // SAFETY: the f32 buffer read as bytes.
+                    let bytes = unsafe { std::slice::from_raw_parts_mut(micv.as_mut_ptr() as *mut u8, n * 4) };
+                    m.read(bytes).is_ok()
+                }
+                None => false,
+            };
+            if !have_mic {
+                micv.iter_mut().for_each(|s| *s = 0.0);
+                tick += Duration::from_millis(10);
+                let now = std::time::Instant::now();
+                if tick > now {
+                    std::thread::sleep(tick - now);
+                } else if now - tick > Duration::from_millis(100) {
+                    tick = now;
+                }
+            }
+            let (mic_on, mic_g) = (c.mic_on.load(Ordering::Relaxed), Controls::get(&c.mic_gain));
+            let media_g = Controls::get(&c.media_gain);
+            let monitor = c.monitor.load(Ordering::Relaxed);
+            let media: Vec<f32> = {
+                let mut r = media_ring().lock().unwrap();
+                let k = n.min(r.len());
+                r.drain(..k).collect()
+            };
+            Controls::set(&c.media_level, peak(&media) * media_g);
+            Controls::set(&c.mic_level, if mic_on && have_mic { peak(&micv) * mic_g } else { 0.0 });
+            for i in 0..n {
+                let m = media.get(i).copied().unwrap_or(0.0) * media_g;
+                let v = if mic_on { micv[i] * mic_g } else { 0.0 };
+                out[i] = (v + m).clamp(-1.0, 1.0);
+                mon[i] = m.clamp(-1.0, 1.0);
+            }
+            if let Some(cb) = &cable {
+                feed(cb, &out);
+            }
+            if let Some(s) = &spk {
+                if monitor && !media.is_empty() {
+                    feed(s, &mon);
+                }
+            }
+        }
+        Ok(())
     }
 }

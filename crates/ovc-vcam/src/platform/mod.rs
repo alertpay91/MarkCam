@@ -10,6 +10,16 @@ mod macos;
 #[cfg(target_os = "linux")]
 mod linux;
 
+/// Linux: the "MarkCam" v4l2loopback device node, if it exists.
+#[cfg(target_os = "linux")]
+pub fn linux_device() -> Option<std::path::PathBuf> {
+    linux::find_device()
+}
+#[cfg(not(target_os = "linux"))]
+pub fn linux_device() -> Option<std::path::PathBuf> {
+    None
+}
+
 pub fn open() -> anyhow::Result<Box<dyn VirtualCamera>> {
     #[cfg(target_os = "windows")]
     {

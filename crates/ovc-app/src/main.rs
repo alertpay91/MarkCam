@@ -15,6 +15,15 @@ mod autostart;
 /// A build to share with everyone (MARKCAM_PUBLIC=1 at build time): no ManyCam options
 /// (only MarkCam's own effects), the VB-CABLE name kept visible on the microphone.
 pub const PUBLIC: bool = option_env!("MARKCAM_PUBLIC").is_some();
+
+/// What the system asks before an admin step (in "confirm the … prompt").
+const ADMIN_PROMPT: &str = if cfg!(windows) { "Windows prompt" } else { "password prompt" };
+
+/// Show a folder in the file manager.
+fn open_folder(dir: &Path) {
+    let opener = if cfg!(windows) { "explorer" } else { "xdg-open" };
+    let _ = std::process::Command::new(opener).arg(dir).spawn();
+}
 mod banner;
 mod boost;
 mod maker;
@@ -2224,6 +2233,12 @@ impl Studio {
             self.start_minimized = false;
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
         }
+        // MarkCam was started again while running: come to the front.
+        autostart::watch_show_requests(ctx);
+        if autostart::take_show_request() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         // F toggles freeze (unless typing in a text field).
         if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F) && i.modifiers.is_none()) {
             self.set_frozen(!self.frozen);
@@ -2482,7 +2497,7 @@ impl Studio {
                     // Right side: virtual camera.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if self.vcam_installing.is_some() {
-                            theme::pill(ui, "Installing… confirm the Windows prompt", theme::WARN);
+                            theme::pill(ui, &format!("Installing… confirm the {ADMIN_PROMPT}"), theme::WARN);
                         } else if self.vcam_state == vcam::InstallState::Missing {
                             if ui
                                 .add(egui::Button::new(egui::RichText::new("Install virtual camera").color(egui::Color32::WHITE)).fill(theme::ACCENT))
@@ -3301,13 +3316,13 @@ impl Studio {
                                             ui.label("A microphone named \"MarkCam Microphone\" for ClassIn: it carries your voice plus the sound of videos you play.");
                                             ui.label(
                                                 egui::RichText::new(
-                                                    "One-time install (admin): MarkCam sets up the free VB-CABLE virtual audio cable and names it MarkCam Microphone.",
+                                                    audio::SETUP_NOTE,
                                                 )
                                                 .small()
                                                 .color(theme::TEXT_DIM),
                                             );
                                             if ui
-                                                .add(egui::Button::new(egui::RichText::new("Install MarkCam Microphone").color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                                                .add(egui::Button::new(egui::RichText::new(audio::SETUP_BUTTON).color(egui::Color32::WHITE)).fill(theme::ACCENT))
                                                 .clicked()
                                             {
                                                 self.audio_setup = Some(audio::Setup::start(false));
@@ -3343,9 +3358,9 @@ impl Studio {
                                         .as_ref()
                                         .and_then(|id| self.mics.iter().find(|m| &m.id == id))
                                         .map(|m| m.name.clone())
-                                        .unwrap_or_else(|| "Windows default".into());
+                                        .unwrap_or_else(|| audio::DEFAULT_MIC.into());
                                     egui::ComboBox::from_id_salt("mic").width(200.0).selected_text(cur).show_ui(ui, |ui| {
-                                        if ui.selectable_label(self.audio_mic.is_none(), "Windows default").clicked() {
+                                        if ui.selectable_label(self.audio_mic.is_none(), audio::DEFAULT_MIC).clicked() {
                                             self.audio_mic = None;
                                         }
                                         for m in &self.mics {
@@ -3425,7 +3440,7 @@ impl Studio {
                                             pending = Some(Spec::Media(f.clone()));
                                         }
                                         if ui.button("Open folder").clicked() {
-                                            let _ = std::process::Command::new("explorer").arg(link::downloads_dir()).spawn();
+                                            open_folder(&link::downloads_dir());
                                         }
                                     });
                                 }
@@ -3466,7 +3481,7 @@ impl Studio {
                                         }
                                     });
                                 } else if self.vcam_installing.is_some() {
-                                    ui.label("Installing… confirm the Windows prompt.");
+                                    ui.label(format!("Installing… confirm the {ADMIN_PROMPT}."));
                                 } else {
                                     ui.label("Makes \"MarkCam\" appear as a camera in ClassIn, Zoom, OBS…");
                                     if ui.button("Install (admin)").clicked() {
@@ -3502,10 +3517,10 @@ impl Studio {
                                 );
                                 ui.add_space(6.0);
                                 let mut auto = self.autostart;
-                                if ui.checkbox(&mut auto, "Start MarkCam with Windows (minimized)").changed() {
+                                if ui.checkbox(&mut auto, autostart::LABEL).changed() {
                                     match autostart::set(auto) {
                                         Ok(()) => self.autostart = autostart::enabled(),
-                                        Err(e) => self.load_err = Some(format!("start with Windows: {e}")),
+                                        Err(e) => self.load_err = Some(format!("{}: {e}", autostart::LABEL)),
                                     }
                                 }
                                 note(
@@ -3526,7 +3541,7 @@ impl Studio {
                                     if ui.button("Open folder").clicked() {
                                         let dir = link::downloads_dir();
                                         let _ = std::fs::create_dir_all(&dir);
-                                        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+                                        open_folder(&dir);
                                     }
                                     if self.download_dir.is_some() && ui.small_button("Reset to default").clicked() {
                                         self.download_dir = None;
@@ -4193,7 +4208,8 @@ impl Studio {
         // Person segmentation, while a virtual background is chosen (shut down 3 s after).
         let want_bg = fx.vbg.needs_matte();
         if want_bg && self.seg.is_none() {
-            let integrated = fx.gpu.adapter_info.to_string().contains("IntegratedGpu");
+            // (Linux: no DirectML — the models run on the CPU.)
+            let integrated = fx.gpu.adapter_info.to_string().contains("IntegratedGpu") || !cfg!(windows);
             let w = vbg::SegWorker::start(self.cap.latest.clone(), fx.vbg.quality, integrated);
             fx.vbg.matte_src = Some(w.matte.clone());
             self.seg = Some(w);
@@ -4308,7 +4324,7 @@ impl Studio {
                             let dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("source"))).filter(|d| d.is_dir());
                             match dir {
                                 Some(d) => {
-                                    let _ = std::process::Command::new("explorer").arg(d).spawn();
+                                    open_folder(&d);
                                 }
                                 None => self.load_err = Some("the source code is not installed with this copy".into()),
                             }
@@ -4678,6 +4694,16 @@ fn preview_image_unflipped(rgba: &[u8], w: u32, h: u32, shown: (f32, f32)) -> eg
 
 fn main() -> eframe::Result<()> {
     tracing_subscriber::fmt().with_max_level(tracing::Level::WARN).init();
+    // Linux: the data folder the code finds through %APPDATA% (~/.config/MarkCam).
+    #[cfg(not(windows))]
+    if std::env::var_os("APPDATA").is_none() {
+        let config = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")));
+        if let Some(c) = config {
+            std::env::set_var("APPDATA", c);
+        }
+    }
     // Formerly "OpenVCam": carry its settings / My Effects / models over (once).
     settings::migrate_old_dir();
     // The elevated half of the MarkCam Microphone setup (no window).
@@ -4699,6 +4725,14 @@ fn main() -> eframe::Result<()> {
         thread::spawn(|| tools::update_ytdlp(false));
     }
     let mut viewport = egui::ViewportBuilder::default().with_inner_size([1240.0, 760.0]).with_min_inner_size([900.0, 560.0]);
+    // Linux: the window's icon and the id that ties it to markcam.desktop (taskbar, dock).
+    #[cfg(not(windows))]
+    {
+        viewport = viewport.with_app_id("markcam");
+        if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/markcam.png")) {
+            viewport = viewport.with_icon(icon);
+        }
+    }
     // Testing aid: OVC_WINDOW_POS=x,y places the window (e.g. off-screen for screenshots).
     if let Some((x, y)) = std::env::var("OVC_WINDOW_POS").ok().and_then(|s| {
         let (x, y) = s.split_once(',')?;

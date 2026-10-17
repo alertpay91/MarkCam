@@ -13,9 +13,12 @@ Code and models (each under its own license; full texts in the "licenses" folder
 - Ultra-Light-Fast-Generic-Face-Detector (version-RFB-320, face detection) — Linzaer, MIT License.
 - VB-CABLE (MarkCam Microphone) — VB-Audio Software, donationware.
   Origin: www.vb-cable.com. If you find it useful, please support VB-Audio there.
-- FFmpeg — GPL (gyan.dev build); yt-dlp — The Unlicense.
-- Rust crates (egui, wgpu, image, tiny-skia, ab_glyph, tract, ort, nokhwa, …) — MIT / Apache-2.0;
-  see Cargo.lock in the source code.
+- FFmpeg — GPL (gyan.dev build; on Linux the system's ffmpeg package); yt-dlp — The Unlicense.
+- Rust crates (egui, wgpu, image, tiny-skia, ab_glyph, tract, ort, nokhwa, x11rb,
+  libpulse-binding, …) — MIT / Apache-2.0; see Cargo.lock in the source code.
+- Linux only, installed from the system's own packages (not shipped with MarkCam):
+  v4l2loopback (the MarkCam camera) — GPL-2.0; PulseAudio / PipeWire client library — LGPL-2.1;
+  slop (the area picker) — GPL-3.0.
 
 Art:
 - Noto Animated Emoji — Google, CC BY 4.0 (resized and re-encoded).

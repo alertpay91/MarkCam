@@ -83,6 +83,21 @@ pub fn downloads_dir() -> std::path::PathBuf {
 }
 
 pub fn default_downloads_dir() -> std::path::PathBuf {
+    // Linux: the desktop's Videos folder (its name is translated, so ask for it).
+    #[cfg(not(windows))]
+    {
+        let videos = Command::new("xdg-user-dir")
+            .arg("VIDEOS")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Videos")));
+        if let Some(v) = videos {
+            return v.join("MarkCam");
+        }
+    }
     std::env::var_os("USERPROFILE")
         .map(|h| std::path::PathBuf::from(h).join("Videos").join("MarkCam"))
         .unwrap_or_else(|| crate::settings::app_dir().join("Downloads"))
@@ -384,7 +399,11 @@ fn spawn(inputs: &[String], looped: bool, at: f64) -> anyhow::Result<Running> {
         cmd.args(["-hwaccel", "auto"]);
         // Real-time pace, but grab 2 s ahead at the start and catch up after a network
         // hiccup — the buffer that keeps playback smooth.
-        cmd.args(["-readrate", "1", "-readrate_initial_burst", "2", "-readrate_catchup", "1.5", "-i", i]);
+        cmd.args(["-readrate", "1", "-readrate_initial_burst", "2"]);
+        if crate::tools::ffmpeg_has_catchup() {
+            cmd.args(["-readrate_catchup", "1.5"]);
+        }
+        cmd.args(["-i", i]);
     }
     let audio_input = if inputs.len() > 1 { "1:a:0?" } else { "0:a:0?" };
     // ffmpeg refuses to start when an output gets no stream, so a file without sound

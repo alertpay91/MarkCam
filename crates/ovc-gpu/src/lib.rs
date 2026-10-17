@@ -33,8 +33,23 @@ impl GpuContext {
     }
 
     async fn new_async() -> anyhow::Result<Self> {
+        // Linux: Vulkan first (Mesa / NVIDIA); OpenGL only without it — wgpu's EGL setup
+        // can abort the process on some X servers, so it is not even probed when Vulkan works.
+        let tries: &[wgpu::Backends] =
+            if cfg!(target_os = "linux") { &[wgpu::Backends::VULKAN, wgpu::Backends::GL] } else { &[wgpu::Backends::all()] };
+        let mut last = anyhow!("no GPU adapter (not even a software fallback)");
+        for &backends in tries {
+            match Self::with_backends(backends).await {
+                Ok(c) => return Ok(c),
+                Err(e) => last = e,
+            }
+        }
+        Err(last)
+    }
+
+    async fn with_backends(backends: wgpu::Backends) -> anyhow::Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends,
             flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });
@@ -58,12 +73,18 @@ impl GpuContext {
         };
         let info = adapter.get_info();
         let adapter_info = format!("{} [{:?}, {:?}]", info.name, info.backend, info.device_type);
+        // The standard limits (plus the adapter's texture sizes), not the adapter's maximums:
+        // asking for everything makes software Vulkan (lavapipe — virtual machines, no GPU
+        // driver) allocate huge descriptor pools and crash.
+        let max = adapter.limits();
+        let base = if wgpu::Limits::default().check_limits(&max) { wgpu::Limits::default() } else { wgpu::Limits::downlevel_defaults() };
+        let limits = base.using_resolution(max);
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("ovc-gpu"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: adapter.limits(),
+                    required_limits: limits,
                     memory_hints: wgpu::MemoryHints::Performance,
                 },
                 None,

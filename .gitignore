@@ -29,4 +29,6 @@
 /assets/out/
 /assets/cache/
 /tools/effects-art/target/
-/LAPTOP-DIJAGNOSTIKA.md/.claude/
+/installer/stage-linux/
+/LAPTOP-DIJAGNOSTIKA.md
+/.claude/

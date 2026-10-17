@@ -132,9 +132,15 @@ pub fn to_recycle_bin(p: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Linux: the desktop's Trash (`gio trash`, GLib's tool, on every GTK desktop).
 #[cfg(not(windows))]
 pub fn to_recycle_bin(p: &Path) -> std::io::Result<()> {
-    std::fs::remove_file(p)
+    let trashed = std::process::Command::new("gio").arg("trash").arg(p).status().is_ok_and(|s| s.success());
+    if trashed && !p.exists() {
+        Ok(())
+    } else {
+        std::fs::remove_file(p)
+    }
 }
 
 /// Video files in a folder, as "My effects" entries.

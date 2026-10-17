@@ -1,7 +1,7 @@
 # MarkCam
 
 **A free virtual camera with live, fun effects for online teaching** (ClassIn, Zoom, Teams…),
-made by a teacher, for teachers. Windows 10 / 11.
+made by a teacher, for teachers. Windows 10 / 11 and Linux (Linux Mint 22, Ubuntu 24.04).
 
 - **Effects that follow your face:** 40+ animated reaction faces, animal masks, characters
   (baby, grandpa, astronaut…), realistic hair and beards, crowns, rain clouds over your head,
@@ -20,13 +20,23 @@ made by a teacher, for teachers. Windows 10 / 11.
 
 ## Download
 
-Get the installer from **[Releases](https://github.com/alertpay91/MarkCam/releases)**
-(`MarkCam-Setup-…-public.exe`). Windows may say "unknown publisher" — click *More info → Run anyway*.
+Get it from **[Releases](https://github.com/alertpay91/MarkCam/releases)**:
+
+- **Windows:** `MarkCam-Setup-…-public.exe`. Windows may say "unknown publisher" — click
+  *More info → Run anyway*.
+- **Linux Mint / Ubuntu:** `markcam_…_amd64.deb` — double-click it, or
+  `sudo apt install ./markcam_*.deb`. apt brings what it needs (v4l2loopback for the
+  "MarkCam" camera, ffmpeg, slop). With Secure Boot on, enroll the key when asked after the
+  restart. The *MarkCam Microphone* is one click in the Audio tab (PulseAudio / PipeWire,
+  no driver). Screen sharing needs the normal X11 session (Mint's default).
 
 ## Build
 
 Rust (stable, `x86_64-pc-windows-gnu`), NASM. `cargo build --release -p ovc-app -p ovc-dshow`.
 The installer: `installer\build-installer.ps1 -Version x.y.z -Public` (Inno Setup 6).
+Linux: `installer\build-deb.ps1 -Version x.y.z` builds the `.deb` through WSL (Ubuntu 24.04),
+or run `installer/linux/build-deb.sh` on Linux itself (needs `libpulse-dev`, `libgtk-3-dev`,
+`libxkbcommon-dev`, `libclang-dev`, `nasm`).
 Effect art: `tools\effects-art` (see `docs/EFFECTS.md`).
 
 ## License

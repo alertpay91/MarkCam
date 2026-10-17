@@ -1,0 +1,16 @@
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    # The "MarkCam" camera now (at boot it is loaded by modules-load.d).
+    if ! grep -qsx MarkCam /sys/class/video4linux/*/name; then
+        if lsmod | grep -q '^v4l2loopback'; then
+            # Loaded by another program with other options: reload with MarkCam's if free.
+            modprobe -r v4l2loopback 2>/dev/null && modprobe v4l2loopback 2>/dev/null || \
+                echo "MarkCam: v4l2loopback is in use by another program; the MarkCam camera appears after a restart." >&2
+        else
+            modprobe v4l2loopback 2>/dev/null || \
+                echo "MarkCam: the virtual camera driver could not be loaded now. Restart the computer (with Secure Boot on, enroll the key you were asked to set during the install)." >&2
+        fi
+    fi
+fi
+exit 0

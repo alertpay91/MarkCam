@@ -33,6 +33,15 @@ pub fn apply(ctx: &egui::Context) {
             break;
         }
     }
+    // Linux without a CJK font: symbols such as ● from DejaVu (on every Linux desktop).
+    if !fonts.font_data.contains_key("cjk") {
+        if let Ok(bytes) = std::fs::read("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") {
+            fonts.font_data.insert("symbols".into(), egui::FontData::from_owned(bytes));
+            for fam in [FontFamily::Proportional, FontFamily::Monospace] {
+                fonts.families.entry(fam).or_default().push("symbols".into());
+            }
+        }
+    }
     ctx.set_fonts(fonts);
 
     let mut v = egui::Visuals::dark();

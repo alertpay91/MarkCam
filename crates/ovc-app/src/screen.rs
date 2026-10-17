@@ -1,5 +1,5 @@
 //! The screen as a video source: the whole screen or a user-picked area (e.g. a student's
-//! video tile in ClassIn), captured with GDI at 30 fps including the mouse pointer — plus
+//! video tile in ClassIn), captured with GDI (Linux: X11) at 30 fps including the mouse pointer — plus
 //! the snipping-tool style area picker. Effects (face masks, moustaches…) then apply to
 //! whatever is in that area, exactly as with the webcam.
 //!
@@ -465,23 +465,179 @@ mod imp {
     }
 }
 
+/// Linux (X11, Linux Mint's default session): the screen is copied through shared memory
+/// (MIT-SHM, no copy over the X socket), the pointer drawn in from XFixes; the area picker
+/// is `slop` (the standard "drag out a rectangle" tool).
 #[cfg(not(windows))]
 mod imp {
     use super::*;
-    pub struct Grabber;
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xproto::{ConnectionExt as _, ImageFormat};
+    use x11rb::protocol::{randr, shm, xfixes};
+    use x11rb::rust_connection::RustConnection;
+
+    struct Shm {
+        seg: shm::Seg,
+        addr: *mut u8,
+        len: usize,
+    }
+
+    pub struct Grabber {
+        conn: RustConnection,
+        root: u32,
+        shm: Option<Shm>,
+        cursor: bool,
+    }
+
+    // Used only from the capture thread that owns the source.
+    unsafe impl Send for Grabber {}
+
+    fn connect() -> anyhow::Result<(RustConnection, usize)> {
+        x11rb::connect(None).map_err(|e| {
+            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                anyhow::anyhow!("screen capture needs an X11 session (Wayland: log in with \"Cinnamon\" / Xorg)")
+            } else {
+                anyhow::anyhow!("can't reach the X server: {e}")
+            }
+        })
+    }
+
     impl Grabber {
-        pub fn new(_: u32, _: u32) -> anyhow::Result<Self> {
-            anyhow::bail!("screen capture is Windows-only for now")
+        pub fn new(w: u32, h: u32) -> anyhow::Result<Self> {
+            let (conn, screen) = connect()?;
+            let root = conn.setup().roots[screen].root;
+            let len = w as usize * h as usize * 4;
+            let shm = Self::attach(&conn, len);
+            let cursor = xfixes::query_version(&conn, 4, 0).ok().and_then(|c| c.reply().ok()).is_some();
+            Ok(Grabber { conn, root, shm, cursor })
         }
-        pub fn grab(&mut self, _: Area, _: &mut [u8]) -> anyhow::Result<()> {
+
+        /// A shared-memory segment the X server writes the picture into (None: not
+        /// available, e.g. a remote display — then the slower plain copy is used).
+        fn attach(conn: &RustConnection, len: usize) -> Option<Shm> {
+            shm::query_version(conn).ok()?.reply().ok()?;
+            // SAFETY: a private SysV segment, attached here and marked for removal at once
+            // (it goes away when both MarkCam and the X server have detached).
+            unsafe {
+                let id = libc::shmget(libc::IPC_PRIVATE, len, libc::IPC_CREAT | 0o600);
+                if id < 0 {
+                    return None;
+                }
+                let addr = libc::shmat(id, std::ptr::null(), 0);
+                if addr as isize == -1 {
+                    libc::shmctl(id, libc::IPC_RMID, std::ptr::null_mut());
+                    return None;
+                }
+                let seg = conn.generate_id().ok()?;
+                let ok = shm::attach(conn, seg, id as u32, false).ok().and_then(|c| c.check().ok()).is_some();
+                libc::shmctl(id, libc::IPC_RMID, std::ptr::null_mut());
+                if !ok {
+                    libc::shmdt(addr);
+                    return None;
+                }
+                Some(Shm { seg, addr: addr as *mut u8, len })
+            }
+        }
+
+        /// Copy the area (with the mouse pointer drawn in) into `out` as BGRA.
+        pub fn grab(&mut self, a: Area, out: &mut [u8]) -> anyhow::Result<()> {
+            let n = a.w as usize * a.h as usize * 4;
+            if out.len() < n {
+                anyhow::bail!("buffer too small");
+            }
+            let (x, y, w, h) = (a.x as i16, a.y as i16, a.w as u16, a.h as u16);
+            match &self.shm {
+                Some(s) if s.len >= n => {
+                    shm::get_image(&self.conn, self.root, x, y, w, h, !0, ImageFormat::Z_PIXMAP.into(), s.seg, 0)?.reply()?;
+                    // SAFETY: the server has finished writing (the reply came back).
+                    out[..n].copy_from_slice(unsafe { std::slice::from_raw_parts(s.addr, n) });
+                }
+                _ => {
+                    let img = self.conn.get_image(ImageFormat::Z_PIXMAP, self.root, x, y, w, h, !0)?.reply()?;
+                    let k = n.min(img.data.len());
+                    out[..k].copy_from_slice(&img.data[..k]);
+                }
+            }
+            if self.cursor {
+                self.draw_cursor(a, out);
+            }
             Ok(())
         }
+
+        /// The pointer (the teacher points at things while sharing), alpha-blended.
+        fn draw_cursor(&self, a: Area, out: &mut [u8]) {
+            let Some(c) = xfixes::get_cursor_image(&self.conn).ok().and_then(|c| c.reply().ok()) else { return };
+            let (cx, cy) = (c.x as i32 - c.xhot as i32 - a.x, c.y as i32 - c.yhot as i32 - a.y);
+            let (aw, ah) = (a.w as i32, a.h as i32);
+            for j in 0..c.height as i32 {
+                let py = cy + j;
+                if py < 0 || py >= ah {
+                    continue;
+                }
+                for i in 0..c.width as i32 {
+                    let px = cx + i;
+                    if px < 0 || px >= aw {
+                        continue;
+                    }
+                    // Premultiplied ARGB.
+                    let argb = c.cursor_image[(j * c.width as i32 + i) as usize];
+                    let al = argb >> 24;
+                    if al == 0 {
+                        continue;
+                    }
+                    let o = ((py * aw + px) * 4) as usize;
+                    let inv = 255 - al;
+                    let src = [argb & 0xff, (argb >> 8) & 0xff, (argb >> 16) & 0xff]; // B, G, R
+                    for k in 0..3 {
+                        out[o + k] = (src[k] + (out[o + k] as u32 * inv) / 255).min(255) as u8;
+                    }
+                }
+            }
+        }
     }
+
+    impl Drop for Grabber {
+        fn drop(&mut self) {
+            if let Some(s) = self.shm.take() {
+                let _ = shm::detach(&self.conn, s.seg);
+                let _ = self.conn.flush();
+                // SAFETY: the segment was attached in `attach` and is no longer used.
+                unsafe {
+                    libc::shmdt(s.addr as *const libc::c_void);
+                }
+            }
+        }
+    }
+
     pub fn primary_screen() -> Area {
-        Area { x: 0, y: 0, w: 1280, h: 720 }
+        let fallback = Area { x: 0, y: 0, w: 1280, h: 720 };
+        let Ok((conn, screen)) = connect() else { return fallback };
+        let root = &conn.setup().roots[screen];
+        // The primary monitor (RandR); else the whole X screen.
+        let primary = randr::get_monitors(&conn, root.root, true)
+            .ok()
+            .and_then(|c| c.reply().ok())
+            .and_then(|m| m.monitors.iter().find(|m| m.primary).or(m.monitors.first()).cloned());
+        match primary {
+            Some(m) => Area { x: m.x as i32, y: m.y as i32, w: m.width as u32, h: m.height as u32 },
+            None => Area { x: 0, y: 0, w: root.width_in_pixels as u32, h: root.height_in_pixels as u32 },
+        }
     }
+
     pub fn pick_area() -> Option<Area> {
-        None
+        let out = std::process::Command::new("slop")
+            .args(["-f", "%x %y %w %h", "-b", "3", "-c", "0.13,0.55,1,0.35", "-l"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None; // cancelled (Esc / right click)
+        }
+        let v: Vec<i64> = String::from_utf8_lossy(&out.stdout).split_whitespace().filter_map(|s| s.parse().ok()).collect();
+        let [x, y, w, h] = v[..] else { return None };
+        // Even sizes; tiny drags count as cancelled.
+        let a = Area { x: x as i32, y: y as i32, w: (w as u32) & !1, h: (h as u32) & !1 };
+        (a.w >= 16 && a.h >= 16).then_some(a)
     }
+
     pub fn exclude_from_capture(_: isize, _: bool) {}
 }

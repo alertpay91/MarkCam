@@ -1,5 +1,5 @@
 //! Video files (MP4, MOV, WMV, AVI…) as effect layers, decoded by Windows Media Foundation
-//! (built into Windows — no codecs to ship). Each video layer streams on its own thread,
+//! (built into Windows — no codecs to ship; on Linux by ffmpeg). Each video layer streams on its own thread,
 //! looping, paced to the file's own timestamps, and publishes only its newest frame, so a
 //! long clip never sits in memory.
 
@@ -268,10 +268,51 @@ mod imp {
     }
 }
 
+/// Linux: ffmpeg (shipped with MarkCam) decodes, scales and paces the video, looping.
 #[cfg(not(windows))]
 mod imp {
     use super::*;
-    pub fn decode_loop(_: &Path, _: &Latest, _: &AtomicBool, _: u32) -> anyhow::Result<()> {
-        anyhow::bail!("video layers are Windows-only for now")
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    /// The video's size, from ffmpeg's description of the file.
+    fn size_of(path: &Path) -> Option<(u32, u32)> {
+        let out = Command::new(crate::tools::ffmpeg()).args(["-hide_banner", "-nostdin", "-i"]).arg(path).output().ok()?;
+        let info = String::from_utf8_lossy(&out.stderr);
+        let line = info.lines().find(|l| l.contains("Stream #") && l.contains("Video:"))?;
+        line.split(|c: char| c == ',' || c == ' ').find_map(|tok| {
+            let (w, h) = tok.split_once('x')?;
+            Some((w.parse::<u32>().ok().filter(|&w| w > 0)?, h.parse::<u32>().ok().filter(|&h| h > 0)?))
+        })
+    }
+
+    pub fn decode_loop(path: &Path, latest: &Latest, stop: &AtomicBool, max_side: u32) -> anyhow::Result<()> {
+        let (nw, nh) = size_of(path).ok_or_else(|| anyhow::anyhow!("can't read this video"))?;
+        let k = (max_side as f32 / nw.max(nh).max(1) as f32).min(1.0);
+        let (w, h) = ((((nw as f32 * k) as u32) & !1).max(2), (((nh as f32 * k) as u32) & !1).max(2));
+        let mut child = Command::new(crate::tools::ffmpeg())
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-stream_loop", "-1", "-re", "-i"])
+            .arg(path)
+            .args(["-an", "-vf", &format!("scale={w}:{h}"), "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?;
+        let mut out = child.stdout.take().ok_or_else(|| anyhow::anyhow!("no video pipe"))?;
+        let mut seq = 0u64;
+        let mut rgba = vec![0u8; w as usize * h as usize * 4];
+        let r = loop {
+            if stop.load(Ordering::SeqCst) {
+                break Ok(());
+            }
+            if out.read_exact(&mut rgba).is_err() {
+                break if seq == 0 { Err(anyhow::anyhow!("video has no frames")) } else { Ok(()) };
+            }
+            seq += 1;
+            *latest.lock().unwrap() = Some((seq, Arc::new(rgba.clone()), w, h));
+        };
+        let _ = child.kill();
+        let _ = child.wait();
+        r
     }
 }

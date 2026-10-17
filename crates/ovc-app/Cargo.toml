@@ -65,5 +65,14 @@ windows = { workspace = true, features = [
     "Win32_System_Variant",
 ] }
 
+# Linux: the MarkCam Microphone and the video sound go through PulseAudio's API (served
+# by PipeWire on current distributions).
+[target.'cfg(target_os = "linux")'.dependencies]
+libpulse-binding = "2.28"
+libpulse-simple-binding = "2.28"
+# Screen capture (X11 shared memory + the pointer) and its shared-memory segment.
+x11rb = { version = "0.13", features = ["shm", "xfixes", "randr"] }
+libc = "0.2"
+
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1.19"

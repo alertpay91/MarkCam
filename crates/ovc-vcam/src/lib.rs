@@ -23,6 +23,11 @@ pub trait VirtualCamera: Send {
     fn consumer(&self) -> Option<(u32, u32, u32)> {
         None
     }
+    /// Like [`consumer`](Self::consumer), for backends that must read the OS to tell
+    /// (v4l2loopback's event queue).
+    fn consumer_mut(&mut self) -> Option<(u32, u32, u32)> {
+        self.consumer()
+    }
     fn stop(&mut self);
 }
 

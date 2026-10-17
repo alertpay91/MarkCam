@@ -46,6 +46,8 @@ pub fn list_cameras() -> anyhow::Result<Vec<CameraInfo>> {
         Ok(cams
             .into_iter()
             .map(|c| CameraInfo { index: c.index().as_index().unwrap_or(0), name: c.human_name() })
+            // Linux: MarkCam's own virtual camera is a v4l2loopback device like any webcam.
+            .filter(|c| !(cfg!(target_os = "linux") && c.name.trim() == "MarkCam"))
             .collect())
     }
     #[cfg(not(feature = "camera"))]

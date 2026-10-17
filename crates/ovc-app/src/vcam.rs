@@ -2,6 +2,7 @@
 //! DirectShow filter (`markcam_dshow.dll`, shipped next to the exe).
 
 use std::collections::VecDeque;
+#[cfg(windows)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -12,6 +13,7 @@ use ovc_core::{PixelFormat, VideoFormat};
 use ovc_vcam::VirtualCamera;
 
 /// File name of the DirectShow filter next to the exe.
+#[cfg(windows)]
 pub const DLL_NAME: &str = "markcam_dshow.dll";
 /// Must match `CLSID_OPENVCAM` in `plugins/windows-dshow`.
 #[cfg(windows)]
@@ -270,8 +272,8 @@ impl Output {
         if !self.on {
             return false;
         }
-        let report = match self.cam.lock().unwrap().as_ref() {
-            Some(cam) => cam.consumer(),
+        let report = match self.cam.lock().unwrap().as_mut() {
+            Some(cam) => cam.consumer_mut(),
             None => return true, // no ring yet: can't tell
         };
         let now = Instant::now();
@@ -315,6 +317,7 @@ mod tests {
     }
 }
 
+#[cfg(windows)]
 fn dll_path() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join(DLL_NAME))
 }
@@ -360,9 +363,14 @@ pub fn install_state() -> InstallState {
     }
 }
 
+/// Linux: whether the "MarkCam" v4l2loopback device exists (the package loads it at boot).
 #[cfg(not(windows))]
 pub fn install_state() -> InstallState {
-    InstallState::Missing
+    if ovc_vcam::platform::linux_device().is_some() {
+        InstallState::Current
+    } else {
+        InstallState::Missing
+    }
 }
 
 /// Register (or with `uninstall`, unregister) the filter via an elevated `regsvr32`
@@ -389,7 +397,22 @@ pub fn install(uninstall: bool) -> Result<Arc<AtomicBool>, String> {
     Ok(busy)
 }
 
+/// Linux: create the "MarkCam" device now (normally done at boot by the package) with one
+/// password prompt (pkexec): v4l2loopback is (re)loaded with MarkCam's options from
+/// /etc/modprobe.d. Uninstall unloads it.
 #[cfg(not(windows))]
-pub fn install(_uninstall: bool) -> Result<Arc<AtomicBool>, String> {
-    Err("virtual camera install is Windows-only for now".into())
+pub fn install(uninstall: bool) -> Result<Arc<AtomicBool>, String> {
+    let opts = "devices=1 video_nr=42 card_label=MarkCam exclusive_caps=1";
+    let script = if uninstall {
+        "modprobe -r v4l2loopback".to_string()
+    } else {
+        format!("modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback {opts}")
+    };
+    let busy = Arc::new(AtomicBool::new(true));
+    let done = busy.clone();
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("pkexec").args(["sh", "-c", &script]).status();
+        done.store(false, Ordering::SeqCst);
+    });
+    Ok(busy)
 }

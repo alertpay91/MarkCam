@@ -8,8 +8,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+#[cfg(windows)]
 const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+#[cfg(not(windows))]
+const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
 const FFMPEG_URL: &str = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
+
+const YTDLP: &str = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
+const FFMPEG: &str = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
 
 pub fn dir() -> PathBuf {
     crate::settings::app_dir().join("tools")
@@ -24,9 +30,9 @@ fn bundled(name: &str) -> Option<PathBuf> {
 /// yt-dlp lives in the user's folder so it can update itself (YouTube changes often); the
 /// installer's copy is moved there on first use.
 pub fn ytdlp() -> PathBuf {
-    let p = dir().join("yt-dlp.exe");
+    let p = dir().join(YTDLP);
     if !p.is_file() {
-        if let Some(b) = bundled("yt-dlp.exe") {
+        if let Some(b) = bundled(YTDLP) {
             let _ = std::fs::create_dir_all(dir());
             let _ = std::fs::copy(b, &p);
         }
@@ -35,11 +41,35 @@ pub fn ytdlp() -> PathBuf {
 }
 
 pub fn ffmpeg() -> PathBuf {
-    let p = dir().join("ffmpeg.exe");
+    let p = dir().join(FFMPEG);
     if p.is_file() {
         return p;
     }
-    bundled("ffmpeg.exe").unwrap_or(p)
+    // Linux: the system's ffmpeg when MarkCam's own copy is missing.
+    let system = std::path::Path::new("/usr/bin/ffmpeg");
+    bundled(FFMPEG).or_else(|| (!cfg!(windows) && system.is_file()).then(|| system.to_path_buf())).unwrap_or(p)
+}
+
+/// Whether this ffmpeg knows `-readrate_catchup` (7.1+; Ubuntu 24.04 / Mint 22 ship 6.1).
+pub fn ffmpeg_has_catchup() -> bool {
+    static HAS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *HAS.get_or_init(|| {
+        let mut cmd = std::process::Command::new(ffmpeg());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
+        let Ok(out) = cmd.args(["-hide_banner", "-version"]).output() else { return true };
+        // "ffmpeg version 6.1.1-3ubuntu5 …", "ffmpeg version n8.1.3-…", "… N-1234-g…" (git: new).
+        let text = String::from_utf8_lossy(&out.stdout);
+        let ver = text.split_whitespace().nth(2).unwrap_or("").trim_start_matches('n');
+        let mut parts = ver.split(|c: char| !c.is_ascii_digit());
+        match (parts.next().and_then(|s| s.parse::<u32>().ok()), parts.next().and_then(|s| s.parse::<u32>().ok())) {
+            (Some(major), minor) => (major, minor.unwrap_or(0)) >= (7, 1),
+            _ => true,
+        }
+    })
 }
 
 /// The folder ffmpeg is in (for yt-dlp's `--ffmpeg-location`).
@@ -98,6 +128,9 @@ impl Fetch {
                     if !ytdlp().is_file() {
                         download(YTDLP_URL, &ytdlp(), "yt-dlp", &status)?;
                     }
+                    if !ffmpeg().is_file() && !cfg!(windows) {
+                        anyhow::bail!("ffmpeg is missing: install it with  sudo apt install ffmpeg");
+                    }
                     if !ffmpeg().is_file() {
                         let zip = dir().join("ffmpeg.zip");
                         download(FFMPEG_URL, &zip, "ffmpeg", &status)?;
@@ -142,6 +175,11 @@ fn download(url: &str, dst: &std::path::Path, what: &str, status: &Mutex<String>
         };
     }
     drop(file);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
     std::fs::rename(&tmp, dst)?;
     Ok(())
 }

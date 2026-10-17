@@ -11,3 +11,7 @@ ovc-ipc.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+# Linux: ioctls on the v4l2loopback device.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
