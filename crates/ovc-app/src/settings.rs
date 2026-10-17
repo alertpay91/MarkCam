@@ -57,6 +57,8 @@ pub struct Settings {
     pub mic_gain: f32,
     pub media_gain: f32,
     pub hear_media: bool,
+    /// Studio voice on the microphone: 0 off, 1 light, 2 best.
+    pub voice_mode: u8,
     /// The last link played.
     pub last_link: String,
     /// Link quality (max lines).
@@ -131,6 +133,7 @@ impl Default for Settings {
             mic_gain: 1.0,
             media_gain: 0.8,
             hear_media: true,
+            voice_mode: 0,
             last_link: String::new(),
             link_quality: 360,
             vcam_on: true,

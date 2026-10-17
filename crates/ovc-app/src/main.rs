@@ -33,6 +33,7 @@ mod tools;
 mod vbg;
 mod vcam;
 mod video;
+mod voice;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1742,6 +1743,7 @@ impl Studio {
         audio::Controls::set(&self.audio_ctl.mic_gain, c.mic_gain);
         audio::Controls::set(&self.audio_ctl.media_gain, c.media_gain);
         self.audio_ctl.monitor.store(c.hear_media, Ordering::Relaxed);
+        self.audio_ctl.voice.store(c.voice_mode.min(voice::BEST), Ordering::Relaxed);
         self.last_link = c.last_link.clone();
         self.link_quality = c.link_quality;
         // Never on in a test run, not even for a moment (see `Studio::new`).
@@ -2059,6 +2061,7 @@ impl Studio {
             mic_gain: audio::Controls::get(&self.audio_ctl.mic_gain),
             media_gain: audio::Controls::get(&self.audio_ctl.media_gain),
             hear_media: self.audio_ctl.monitor.load(Ordering::Relaxed),
+            voice_mode: self.audio_ctl.voice.load(Ordering::Relaxed),
             last_link: self.last_link.clone(),
             link_quality: self.link_quality,
             vcam_on: fx.vcam.on,
@@ -3392,6 +3395,42 @@ impl Studio {
                                 audio::Controls::set(&ctl.mic_gain, mic_g);
                                 audio::Controls::set(&ctl.media_gain, media_g);
                                 ctl.monitor.store(hear, Ordering::Relaxed);
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Studio voice");
+                                    let mut v = ctl.voice.load(Ordering::Relaxed);
+                                    for (m, name, tip) in [
+                                        (voice::OFF, "Off", "Your microphone exactly as it is."),
+                                        (voice::LIGHT, "Light", "Removes steady noise (fan, air conditioning, hum, street) — RNNoise, almost no CPU."),
+                                        (voice::BEST, "Best", "Also keyboard, clicks and other sudden noises, more natural voice — DeepFilterNet, a little more CPU."),
+                                    ] {
+                                        ui.selectable_value(&mut v, m, name).on_hover_text(tip);
+                                    }
+                                    ctl.voice.store(v, Ordering::Relaxed);
+                                });
+                                ui.label(
+                                    egui::RichText::new(
+                                        "Only your voice is cleaned (rumble, room noise, even loudness, no clipping) — videos and music are never touched. \
+                                         Noise is lowered, never muted, and quiet sound is never pumped up.",
+                                    )
+                                    .small()
+                                    .color(theme::TEXT_DIM),
+                                );
+                                let test_status = audio::voice_test().lock().unwrap().status.clone();
+                                let mic_running = self.audio_engine.as_ref().is_some_and(|e| e.status.lock().unwrap().contains("your voice"));
+                                ui.horizontal(|ui| {
+                                    let busy = test_status.starts_with("recording") || test_status.starts_with("preparing") || test_status.starts_with("playing");
+                                    if ui
+                                        .add_enabled(mic_running && !busy, egui::Button::new("🎙 Test: record 5 s, hear before / after"))
+                                        .on_disabled_hover_text("Needs \"Send to MarkCam Microphone\" on and a microphone")
+                                        .clicked()
+                                    {
+                                        audio::start_voice_test();
+                                    }
+                                });
+                                if !test_status.is_empty() {
+                                    ui.label(egui::RichText::new(test_status).small().color(theme::ACCENT));
+                                }
                                 if let Some(e) = &self.audio_engine {
                                     ui.label(egui::RichText::new(e.status.lock().unwrap().clone()).small().color(theme::TEXT_DIM));
                                 }
@@ -4342,6 +4381,7 @@ impl Studio {
                     line(ui, "MarkCam Microphone uses VB-CABLE by VB-Audio Software — donationware; if you find it useful, support it at www.vb-cable.com.");
                     line(ui, "Virtual background: Robust Video Matting (GPL-3.0), MediaPipe Selfie Segmentation © Google (Apache 2.0), MODNet (Apache 2.0), ONNX Runtime (MIT), DirectML (Microsoft).");
                     line(ui, "Face tracking: MediaPipe Face Mesh © Google (Apache 2.0), Ultra-Light face detector (MIT).");
+                    line(ui, "Studio voice: RNNoise © Xiph.Org / Mozilla (BSD 3-Clause, via the nnnoiseless Rust port); DeepFilterNet © Hendrik Schröter (MIT / Apache 2.0).");
                     line(ui, "Video links and downloads: yt-dlp (Unlicense) and FFmpeg (GPL). Only download videos you are allowed to use.");
                     line(ui, "Full license texts are in the \"licenses\" folder next to MarkCam.exe.");
                     ui.add_space(4.0);

@@ -65,6 +65,8 @@ Copy-Item "$root\assets\out\backgrounds" "$stage\backgrounds" -Recurse
 Copy-Item (Need "$root\assets\EMOJI-LICENSES.txt") "$stage\licenses\"
 # Banner fonts (embedded in MarkCam.exe): their licenses.
 Copy-Item "$root\crates\ovc-app\assets\fonts\*.txt" "$stage\licenses\"
+# Studio voice (built into MarkCam.exe): RNNoise / nnnoiseless and DeepFilterNet.
+Copy-Item "$PSScriptRoot\licenses\*.txt" "$stage\licenses\"
 foreach ($t in 'yt-dlp.exe', 'ffmpeg.exe') { Copy-Item (Need "$data\tools\$t") "$stage\tools\" }
 # VB-CABLE driver pack (only the files its installer needs).
 Copy-Item (Need "$data\tools\vbcable\*") "$stage\drivers\vbcable\" -Recurse

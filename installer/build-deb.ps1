@@ -35,6 +35,7 @@ Copy-Item "$root\assets\out\backgrounds" "$stage\backgrounds" -Recurse
 foreach ($l in 'MODNet-LICENSE.txt', 'RVM-LICENSE.txt') { Copy-Item (Need "$data\runtime\$l") "$stage\licenses\" }
 Copy-Item (Need "$root\assets\EMOJI-LICENSES.txt") "$stage\licenses\"
 Copy-Item "$root\crates\ovc-app\assets\fonts\*.txt" "$stage\licenses\"
+Copy-Item "$PSScriptRoot\licenses\*.txt" "$stage\licenses\"
 Copy-Item (Need "$root\LICENSE") "$stage\LICENSE.txt"
 Copy-Item (Need "$root\THIRD-PARTY-NOTICES.txt") "$stage\THIRD-PARTY-NOTICES.txt"
 $zip = Join-Path $root "dist\MarkCam-$Version-source.zip"

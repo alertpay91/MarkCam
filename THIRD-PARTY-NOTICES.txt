@@ -11,6 +11,9 @@ Code and models (each under its own license; full texts in the "licenses" folder
 - MediaPipe Face Mesh V2 (face tracking) — Google, Apache License 2.0
   (ONNX conversion: huggingface.co/fernandotonon/QtMeshEditor-facemesh-onnx).
 - Ultra-Light-Fast-Generic-Face-Detector (version-RFB-320, face detection) — Linzaer, MIT License.
+- RNNoise (Studio voice "Light") — Xiph.Org Foundation, Mozilla, Jean-Marc Valin; Rust port
+  nnnoiseless — Joe Neeman; BSD 3-Clause License.
+- DeepFilterNet (Studio voice "Best", model DeepFilterNet3) — Hendrik Schröter, MIT / Apache 2.0.
 - VB-CABLE (MarkCam Microphone) — VB-Audio Software, donationware.
   Origin: www.vb-cable.com. If you find it useful, please support VB-Audio there.
 - FFmpeg — GPL (gyan.dev build; on Linux the system's ffmpeg package); yt-dlp — The Unlicense.

@@ -107,6 +107,8 @@ pub struct Controls {
     /// Peak levels of the last block (f32 bits), for meters.
     pub mic_level: AtomicU32,
     pub media_level: AtomicU32,
+    /// Studio voice on the microphone: `voice::OFF` / `LIGHT` / `BEST`.
+    pub voice: std::sync::atomic::AtomicU8,
 }
 
 impl Controls {
@@ -118,6 +120,7 @@ impl Controls {
             monitor: AtomicBool::new(true),
             mic_level: AtomicU32::new(0),
             media_level: AtomicU32::new(0),
+            voice: std::sync::atomic::AtomicU8::new(crate::voice::OFF),
         })
     }
 
@@ -339,6 +342,92 @@ pub fn elevated_setup(dir: &std::path::Path, install: bool) {
         }
     }
     fix_defaults();
+}
+
+// ── Studio voice and its before / after test ────────────────────────────────────────
+
+/// The 5-second test: record the raw microphone, then play it back without and with
+/// Studio voice on the headphones.
+pub struct VoiceTest {
+    pub recording: Option<Vec<f32>>,
+    pub playback: VecDeque<f32>,
+    pub status: String,
+}
+
+pub fn voice_test() -> &'static Mutex<VoiceTest> {
+    static T: OnceLock<Mutex<VoiceTest>> = OnceLock::new();
+    T.get_or_init(|| Mutex::new(VoiceTest { recording: None, playback: VecDeque::new(), status: String::new() }))
+}
+
+const TEST_SECS: usize = 5;
+
+/// Start recording the test (the audio engine must be running with a microphone).
+pub fn start_voice_test() {
+    let mut t = voice_test().lock().unwrap();
+    t.playback.clear();
+    t.recording = Some(Vec::with_capacity(RATE as usize * CH * TEST_SECS));
+    t.status = format!("recording {TEST_SECS} s — say a few sentences…");
+}
+
+/// Microphone samples on their way to the mix: the test recording, then Studio voice.
+fn mic_stage(c: &Controls, voice: &mut Option<crate::voice::Voice>, block: &mut [f32]) {
+    {
+        let mut t = voice_test().lock().unwrap();
+        let full = t.recording.as_mut().map(|r| {
+            r.extend_from_slice(block);
+            r.len() >= RATE as usize * CH * TEST_SECS
+        });
+        if full == Some(true) {
+            let raw = t.recording.take().unwrap_or_default();
+            let mode = match c.voice.load(Ordering::Relaxed) {
+                crate::voice::OFF => crate::voice::BEST,
+                m => m,
+            };
+            t.status = "preparing the comparison…".into();
+            drop(t);
+            std::thread::spawn(move || {
+                let mut clean = raw.clone();
+                let mut v = crate::voice::Voice::new(mode);
+                for ch in clean.chunks_mut(960) {
+                    v.process(ch);
+                }
+                let name = if mode == crate::voice::BEST { "Best" } else { "Light" };
+                let mut t = voice_test().lock().unwrap();
+                t.playback.extend(raw.iter().copied());
+                t.playback.extend(std::iter::repeat(0.0).take(RATE as usize * CH * 3 / 4));
+                t.playback.extend(clean);
+                t.status = format!("playing: first without, then with Studio voice ({name})");
+            });
+        }
+    }
+    let mode = c.voice.load(Ordering::Relaxed);
+    if voice.as_ref().map(|v| v.mode()) != Some(mode) && !(mode == crate::voice::OFF && voice.is_none()) {
+        *voice = (mode != crate::voice::OFF).then(|| crate::voice::Voice::new(mode));
+    }
+    if let Some(v) = voice {
+        v.process(block);
+    }
+}
+
+/// What the headphones get for `n` samples: the test playback while it lasts, else the
+/// video sound (if "hear the video" is on).
+fn monitor_chunk(media: &[f32], gain: f32, monitor: bool, n: usize) -> Vec<f32> {
+    {
+        let mut t = voice_test().lock().unwrap();
+        if !t.playback.is_empty() {
+            let k = n.min(t.playback.len());
+            let v: Vec<f32> = t.playback.drain(..k).collect();
+            if t.playback.is_empty() && t.recording.is_none() {
+                t.status = "done — listen again with the button".into();
+            }
+            return v;
+        }
+    }
+    if monitor {
+        media.iter().map(|s| s * gain).collect()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Peak of interleaved samples.
@@ -710,6 +799,7 @@ mod imp {
 
             let mut mic_q: VecDeque<f32> = VecDeque::new();
             let mut spk_q: VecDeque<f32> = VecDeque::new();
+            let mut voice: Option<crate::voice::Voice> = None;
             let target = RATE / 25; // ~40 ms queued on each output
             while !stop.load(Ordering::SeqCst) {
                 // 1. Drain the microphone.
@@ -723,11 +813,13 @@ mod imp {
                             break;
                         }
                         let n = frames as usize * CH;
-                        if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || p.is_null() {
-                            mic_q.extend(std::iter::repeat(0.0).take(n));
+                        let mut block = if flags & AUDCLNT_BUFFERFLAGS_SILENT.0 as u32 != 0 || p.is_null() {
+                            vec![0.0; n]
                         } else {
-                            mic_q.extend(std::slice::from_raw_parts(p as *const f32, n));
-                        }
+                            std::slice::from_raw_parts(p as *const f32, n).to_vec()
+                        };
+                        mic_stage(c, &mut voice, &mut block);
+                        mic_q.extend(block);
                         let _ = cc.ReleaseBuffer(frames);
                     }
                     // Keep latency low: never more than ~80 ms of mic backlog.
@@ -756,9 +848,7 @@ mod imp {
                         };
                         Controls::set(&c.media_level, peak(&media) * media_g);
                         Controls::set(&c.mic_level, if mic_on { peak(&micv) * mic_g } else { 0.0 });
-                        if monitor {
-                            spk_q.extend(media.iter().map(|s| s * media_g));
-                        }
+                        spk_q.extend(monitor_chunk(&media, media_g, monitor, n));
                         (0..n)
                             .map(|i| {
                                 let m = if mic_on { micv.get(i).copied().unwrap_or(0.0) * mic_g } else { 0.0 };
@@ -775,9 +865,7 @@ mod imp {
                         r.drain(..k).collect()
                     };
                     Controls::set(&c.media_level, peak(&media) * media_g);
-                    if monitor {
-                        spk_q.extend(media.iter().map(|s| s * media_g));
-                    }
+                    spk_q.extend(monitor_chunk(&media, media_g, monitor, n));
                 }
 
                 // 3. Speakers.
@@ -999,7 +1087,7 @@ mod imp {
         let n = (RATE as usize / 100) * CH; // 10 ms
         let mut micv = vec![0f32; n];
         let mut out = vec![0f32; n];
-        let mut mon = vec![0f32; n];
+        let mut voice: Option<crate::voice::Voice> = None;
         let mut tick = std::time::Instant::now();
         while !stop.load(Ordering::SeqCst) {
             // The microphone's clock paces the loop; without one, a 10 ms timer does.
@@ -1011,7 +1099,9 @@ mod imp {
                 }
                 None => false,
             };
-            if !have_mic {
+            if have_mic {
+                mic_stage(c, &mut voice, &mut micv);
+            } else {
                 micv.iter_mut().for_each(|s| *s = 0.0);
                 tick += Duration::from_millis(10);
                 let now = std::time::Instant::now();
@@ -1035,14 +1125,14 @@ mod imp {
                 let m = media.get(i).copied().unwrap_or(0.0) * media_g;
                 let v = if mic_on { micv[i] * mic_g } else { 0.0 };
                 out[i] = (v + m).clamp(-1.0, 1.0);
-                mon[i] = m.clamp(-1.0, 1.0);
             }
             if let Some(cb) = &cable {
                 feed(cb, &out);
             }
             if let Some(s) = &spk {
-                if monitor && !media.is_empty() {
-                    feed(s, &mon);
+                let chunk = monitor_chunk(&media, media_g, monitor, n);
+                if !chunk.is_empty() {
+                    feed(s, &chunk);
                 }
             }
         }
