@@ -92,3 +92,35 @@ Type: filesandordirs; Name: "{app}\effects\MarkCam"
 [UninstallDelete]
 ; Files the app may have created next to itself (user data in %APPDATA%\MarkCam is kept).
 Type: filesandordirs; Name: "{app}\tools"
+
+[Code]
+// ONNX Runtime (virtual background, photo cut-out, fast face tracking) needs the Microsoft
+// Visual C++ Runtime. Most PCs have it from other programs; a fresh Windows may not. When it
+// is missing, the official package is downloaded from Microsoft and installed silently
+// (no internet: MarkCam installs anyway and explains in the app).
+function VCRuntimeMissing: Boolean;
+var
+  Installed: Cardinal;
+begin
+  Result := not (RegQueryDWordValue(HKLM64, 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64', 'Installed', Installed) and (Installed = 1))
+    or not FileExists(ExpandConstant('{sys}\msvcp140_1.dll'))
+    or not FileExists(ExpandConstant('{sys}\vcruntime140_1.dll'));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  if (CurStep = ssPostInstall) and VCRuntimeMissing then
+  begin
+    WizardForm.StatusLabel.Caption := 'Downloading the Microsoft Visual C++ Runtime (for the virtual background)...';
+    try
+      DownloadTemporaryFile('https://aka.ms/vs/17/release/vc_redist.x64.exe', 'vc_redist.x64.exe', '', nil);
+      WizardForm.StatusLabel.Caption := 'Installing the Microsoft Visual C++ Runtime...';
+      Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      Log('vc_redist exit code: ' + IntToStr(ResultCode));
+    except
+      Log('vc_redist download failed: ' + GetExceptionMessage);
+    end;
+  end;
+end;

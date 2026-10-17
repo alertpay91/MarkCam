@@ -2960,6 +2960,12 @@ impl Studio {
                                 if let (true, Some(sw)) = (fx.vbg.active(), &self.seg) {
                                     let st = sw.status.lock().unwrap().clone();
                                     ui.label(egui::RichText::new(format!("Person detection {st}")).small().color(theme::TEXT_DIM));
+                                    if vbg::vc_runtime_missing() {
+                                        ui.label(egui::RichText::new("The virtual background needs Microsoft's free Visual C++ Runtime. Download it, run it, then restart MarkCam.").small().color(theme::WARN));
+                                        if ui.button("⬇ Get the Visual C++ Runtime (Microsoft)").clicked() {
+                                            ui.ctx().open_url(egui::OpenUrl::new_tab(vbg::VC_RUNTIME_URL));
+                                        }
+                                    }
                                 }
                                 if let Some(e) = fx.vbg.err.take() {
                                     self.load_err = Some(e);

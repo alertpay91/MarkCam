@@ -174,6 +174,19 @@ pub fn runtime_dir() -> Option<PathBuf> {
     [exe_dir, Some(crate::settings::app_dir().join("runtime"))].into_iter().flatten().find(|d| d.join(name).is_file())
 }
 
+/// Whether the Microsoft Visual C++ Runtime that ONNX Runtime needs is missing (a fresh
+/// Windows; the installer normally adds it).
+pub fn vc_runtime_missing() -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
+    let sys = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows")).join("System32");
+    ["msvcp140.dll", "msvcp140_1.dll", "vcruntime140.dll", "vcruntime140_1.dll"].iter().any(|d| !sys.join(d).is_file())
+}
+
+/// Where Microsoft publishes the Visual C++ Runtime installer (64-bit).
+pub const VC_RUNTIME_URL: &str = "https://aka.ms/vs/17/release/vc_redist.x64.exe";
+
 /// The segmentation model, if installed.
 pub fn model_path() -> Option<PathBuf> {
     let exe_dir = std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("models")));
@@ -258,6 +271,9 @@ fn worker(
     fast: &AtomicBool,
     integrated_gpu: bool,
 ) -> anyhow::Result<()> {
+    if vc_runtime_missing() {
+        anyhow::bail!("the Microsoft Visual C++ Runtime is missing on this PC");
+    }
     let dir = runtime_dir().ok_or_else(|| anyhow::anyhow!("ONNX Runtime is missing (reinstall MarkCam)"))?;
     let model = model_path().ok_or_else(|| anyhow::anyhow!("the background model is missing (reinstall MarkCam)"))?;
     ovc_ml::seg::init_runtime(&dir)?;
