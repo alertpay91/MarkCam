@@ -88,7 +88,7 @@ if (-not $Public -and (Test-Path "$data\library.json")) { Copy-Item "$data\libra
 if ($Public) {
     $src = Join-Path $env:TEMP "markcam-source"
     if (Test-Path $src) { Remove-Item $src -Recurse -Force }
-    $null = robocopy $root "$src\MarkCam" /E /NFL /NDL /NJH /NJS /XD target dist stage out cache clips .vscode .idea .claude preview-tmp /XF LAPTOP-DIJAGNOSTIKA.md *.mp4 *.onnx
+    $null = robocopy $root "$src\MarkCam" /E /NFL /NDL /NJH /NJS /XD target dist stage stage-linux out cache clips .vscode .idea .claude preview-tmp /XF LAPTOP-DIJAGNOSTIKA.md *.mp4 *.onnx
     $null = New-Item -ItemType Directory "$stage\source"
     Compress-Archive -Path "$src\MarkCam" -DestinationPath "$stage\source\MarkCam-$Version-source.zip" -CompressionLevel Optimal
     Copy-Item "$stage\source\MarkCam-$Version-source.zip" (Join-Path $root "dist\") -Force
