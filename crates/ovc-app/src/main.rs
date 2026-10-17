@@ -1744,6 +1744,7 @@ impl Studio {
         audio::Controls::set(&self.audio_ctl.media_gain, c.media_gain);
         self.audio_ctl.monitor.store(c.hear_media, Ordering::Relaxed);
         self.audio_ctl.voice.store(c.voice_mode.min(voice::BEST), Ordering::Relaxed);
+        self.audio_ctl.voice_strength.store(c.voice_strength.clamp(1, 5), Ordering::Relaxed);
         self.last_link = c.last_link.clone();
         self.link_quality = c.link_quality;
         // Never on in a test run, not even for a moment (see `Studio::new`).
@@ -2062,6 +2063,7 @@ impl Studio {
             media_gain: audio::Controls::get(&self.audio_ctl.media_gain),
             hear_media: self.audio_ctl.monitor.load(Ordering::Relaxed),
             voice_mode: self.audio_ctl.voice.load(Ordering::Relaxed),
+            voice_strength: self.audio_ctl.voice_strength.load(Ordering::Relaxed),
             last_link: self.last_link.clone(),
             link_quality: self.link_quality,
             vcam_on: fx.vcam.on,
@@ -3408,6 +3410,18 @@ impl Studio {
                                     }
                                     ctl.voice.store(v, Ordering::Relaxed);
                                 });
+                                if ctl.voice.load(Ordering::Relaxed) != voice::OFF {
+                                    ui.horizontal(|ui| {
+                                        ui.label("Strength");
+                                        let mut s = ctl.voice_strength.load(Ordering::Relaxed);
+                                        let name = ["Gentle", "Soft", "Normal", "Firm", "Strong"][(s.clamp(1, 5) - 1) as usize];
+                                        ui.add(egui::Slider::new(&mut s, 1..=5).show_value(false).text(name)).on_hover_text(
+                                            "Stronger takes out louder noise (typing while you talk) but can color your voice when the noise is loud. \
+                                             Gentler keeps your voice most natural.",
+                                        );
+                                        ctl.voice_strength.store(s, Ordering::Relaxed);
+                                    });
+                                }
                                 ui.label(
                                     egui::RichText::new(
                                         "Only your voice is cleaned (rumble, room noise, even loudness, no clipping) — videos and music are never touched. \
@@ -3421,7 +3435,7 @@ impl Studio {
                                 ui.horizontal(|ui| {
                                     let busy = test_status.starts_with("recording") || test_status.starts_with("preparing") || test_status.starts_with("playing");
                                     if ui
-                                        .add_enabled(mic_running && !busy, egui::Button::new("🎙 Test: record 5 s, hear before / after"))
+                                        .add_enabled(mic_running && !busy, egui::Button::new("🎙 Test: record 8 s, hear before / after"))
                                         .on_disabled_hover_text("Needs \"Send to MarkCam Microphone\" on and a microphone")
                                         .clicked()
                                     {

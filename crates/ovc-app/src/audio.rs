@@ -109,6 +109,8 @@ pub struct Controls {
     pub media_level: AtomicU32,
     /// Studio voice on the microphone: `voice::OFF` / `LIGHT` / `BEST`.
     pub voice: std::sync::atomic::AtomicU8,
+    /// Its strength, 1 (gentle) ..= 5 (strong).
+    pub voice_strength: std::sync::atomic::AtomicU8,
 }
 
 impl Controls {
@@ -121,6 +123,7 @@ impl Controls {
             mic_level: AtomicU32::new(0),
             media_level: AtomicU32::new(0),
             voice: std::sync::atomic::AtomicU8::new(crate::voice::OFF),
+            voice_strength: std::sync::atomic::AtomicU8::new(crate::voice::DEFAULT_STRENGTH),
         })
     }
 
@@ -359,7 +362,7 @@ pub fn voice_test() -> &'static Mutex<VoiceTest> {
     T.get_or_init(|| Mutex::new(VoiceTest { recording: None, playback: VecDeque::new(), status: String::new() }))
 }
 
-const TEST_SECS: usize = 5;
+const TEST_SECS: usize = 8;
 
 /// Start recording the test (the audio engine must be running with a microphone).
 pub fn start_voice_test() {
@@ -379,15 +382,19 @@ fn mic_stage(c: &Controls, voice: &mut Option<crate::voice::Voice>, block: &mut 
         });
         if full == Some(true) {
             let raw = t.recording.take().unwrap_or_default();
+            // Kept on this computer only (overwritten by the next test): lets Studio voice be
+            // tuned on the real voice and room.
+            let _ = crate::voice::write_wav(&crate::settings::app_dir().join("voice-test.wav"), &raw);
             let mode = match c.voice.load(Ordering::Relaxed) {
                 crate::voice::OFF => crate::voice::BEST,
                 m => m,
             };
+            let level = c.voice_strength.load(Ordering::Relaxed);
             t.status = "preparing the comparison…".into();
             drop(t);
             std::thread::spawn(move || {
                 let mut clean = raw.clone();
-                let mut v = crate::voice::Voice::new(mode);
+                let mut v = crate::voice::Voice::new(mode, level);
                 for ch in clean.chunks_mut(960) {
                     v.process(ch);
                 }
@@ -402,9 +409,10 @@ fn mic_stage(c: &Controls, voice: &mut Option<crate::voice::Voice>, block: &mut 
     }
     let mode = c.voice.load(Ordering::Relaxed);
     if voice.as_ref().map(|v| v.mode()) != Some(mode) && !(mode == crate::voice::OFF && voice.is_none()) {
-        *voice = (mode != crate::voice::OFF).then(|| crate::voice::Voice::new(mode));
+        *voice = (mode != crate::voice::OFF).then(|| crate::voice::Voice::new(mode, c.voice_strength.load(Ordering::Relaxed)));
     }
     if let Some(v) = voice {
+        v.set_strength(c.voice_strength.load(Ordering::Relaxed));
         v.process(block);
     }
 }

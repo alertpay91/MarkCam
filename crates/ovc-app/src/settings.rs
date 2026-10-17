@@ -59,6 +59,8 @@ pub struct Settings {
     pub hear_media: bool,
     /// Studio voice on the microphone: 0 off, 1 light, 2 best.
     pub voice_mode: u8,
+    /// Its strength, 1..=5.
+    pub voice_strength: u8,
     /// The last link played.
     pub last_link: String,
     /// Link quality (max lines).
@@ -134,6 +136,7 @@ impl Default for Settings {
             media_gain: 0.8,
             hear_media: true,
             voice_mode: 0,
+            voice_strength: crate::voice::DEFAULT_STRENGTH,
             last_link: String::new(),
             link_quality: 360,
             vcam_on: true,
