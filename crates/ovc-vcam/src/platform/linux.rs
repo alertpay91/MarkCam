@@ -174,7 +174,13 @@ impl VirtualCamera for LinuxVCam {
             f = unsafe { std::mem::zeroed() };
             f.typ = BUF_TYPE_VIDEO_OUTPUT;
             if unsafe { libc::ioctl(dev.as_raw_fd(), VIDIOC_G_FMT as _, &mut f) } != 0 || f.width == 0 {
-                anyhow::bail!("{}: can't set the picture format ({})", path.display(), std::io::Error::last_os_error());
+                // Seen with v4l2loopback-dkms 0.12.7 on kernel 7.0 after a reopen; reloading
+                // the driver (the app's "Repair camera") fixes it.
+                anyhow::bail!(
+                    "the camera driver is stuck ({}: {}) — click \"Repair camera\"",
+                    path.display(),
+                    std::io::Error::last_os_error()
+                );
             }
         }
         if f.pixelformat != FOURCC_YUYV {

@@ -28,13 +28,14 @@ PKG="$(mktemp -d)/markcam_${VERSION}_amd64"
 OPT="$PKG/opt/markcam"
 mkdir -p "$OPT/tools" "$PKG/DEBIAN" "$PKG/usr/bin" "$PKG/usr/share/applications" \
          "$PKG/usr/share/icons/hicolor/256x256/apps" "$PKG/usr/share/doc/markcam" \
-         "$PKG/etc/modprobe.d" "$PKG/etc/modules-load.d"
+         "$PKG/etc/modprobe.d" "$PKG/etc/modules-load.d" "$PKG/etc/depmod.d"
 
 install -m 755 target/release/markcam "$OPT/markcam"
 strip "$OPT/markcam"
 # ONNX Runtime (MIT), loaded at run time like onnxruntime.dll on Windows.
 cp -a "$ORT"/lib/libonnxruntime.so* "$OPT/"
 install -m 755 "$DEPS/yt-dlp" "$OPT/tools/yt-dlp"
+install -m 755 "$HERE/camera-driver.sh" "$OPT/tools/camera-driver.sh"
 cp -r "$STAGE/models" "$STAGE/effects" "$STAGE/backgrounds" "$STAGE/licenses" "$OPT/"
 cp "$ORT/LICENSE" "$OPT/licenses/onnxruntime-LICENSE.txt"
 cp "$ORT/ThirdPartyNotices.txt" "$OPT/licenses/onnxruntime-ThirdPartyNotices.txt"
@@ -46,6 +47,7 @@ ln -s /opt/markcam/markcam "$PKG/usr/bin/markcam"
 install -m 644 "$HERE/markcam.desktop" "$PKG/usr/share/applications/markcam.desktop"
 install -m 644 crates/ovc-app/assets/markcam.png "$PKG/usr/share/icons/hicolor/256x256/apps/markcam.png"
 install -m 644 "$HERE/markcam-v4l2loopback.conf" "$PKG/etc/modprobe.d/markcam-v4l2loopback.conf"
+install -m 644 "$HERE/markcam-depmod.conf" "$PKG/etc/depmod.d/markcam-v4l2loopback.conf"
 printf 'v4l2loopback\n' > "$PKG/etc/modules-load.d/markcam.conf"
 chmod 644 "$PKG/etc/modules-load.d/markcam.conf"
 cat > "$PKG/usr/share/doc/markcam/copyright" <<EOF

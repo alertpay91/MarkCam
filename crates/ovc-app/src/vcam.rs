@@ -2,7 +2,6 @@
 //! DirectShow filter (`markcam_dshow.dll`, shipped next to the exe).
 
 use std::collections::VecDeque;
-#[cfg(windows)]
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -183,6 +182,8 @@ impl Drop for Pacer {
 pub struct Output {
     /// User toggle.
     pub on: bool,
+    /// Held off while the driver is installed / repaired, so the device is free to reload.
+    pub paused: bool,
     pub err: Option<String>,
     cam: SharedCam,
     pacer: Pacer,
@@ -199,7 +200,7 @@ impl Output {
         let pacer = Pacer::start(cam.clone());
         // Off until the settings say otherwise: the capture thread runs before they are
         // applied, and a test instance must never touch the ring ClassIn is watching.
-        Self { on: false, err: None, cam, pacer, size: (0, 0), beat: 0, beat_at: Instant::now(), consumer: None }
+        Self { on: false, paused: false, err: None, cam, pacer, size: (0, 0), beat: 0, beat_at: Instant::now(), consumer: None }
     }
 
     /// The size some app (ClassIn…) is pulling right now, if any.
@@ -224,7 +225,7 @@ impl Output {
     /// actually pulling frames (the plugin's heartbeat), so an idle virtual camera costs
     /// no per-frame copy. The ring itself stays up so an app can start pulling any time.
     pub fn frame(&mut self, rgba: &[u8], w: u32, h: u32) {
-        if !self.on {
+        if !self.on || self.paused {
             if self.cam.lock().unwrap().is_some() {
                 self.stop();
             }
@@ -334,6 +335,24 @@ pub enum InstallState {
     Current,
 }
 
+/// Whether to offer the update / repair button: an outdated install, or (Linux) a driver
+/// that refused the picture format.
+pub fn needs_update(state: InstallState, out: &Output) -> bool {
+    state == InstallState::Outdated
+        || (cfg!(not(windows)) && out.err.as_deref().is_some_and(|e| e.contains("Repair camera")))
+}
+
+#[cfg(windows)]
+pub const UPDATE_LABEL: &str = "Update camera";
+#[cfg(windows)]
+pub const UPDATE_HINT: &str = "The installed virtual camera is an older copy (e.g. still named OpenVCam). \
+                               Click once (admin) to switch it to this MarkCam, then restart ClassIn.";
+#[cfg(not(windows))]
+pub const UPDATE_LABEL: &str = "Repair camera";
+#[cfg(not(windows))]
+pub const UPDATE_HINT: &str = "The MarkCam camera driver needs a fix (an older driver, or it got stuck). \
+                               Close ClassIn / Zoom first, then click once (admin password).";
+
 /// Where the registered filter DLL is and whether it is this exe's.
 #[cfg(windows)]
 pub fn install_state() -> InstallState {
@@ -363,14 +382,42 @@ pub fn install_state() -> InstallState {
     }
 }
 
-/// Linux: whether the "MarkCam" v4l2loopback device exists (the package loads it at boot).
+/// Linux: whether the "MarkCam" v4l2loopback device exists (the package loads it at boot),
+/// and whether it runs on a driver that needs "Repair camera" (see [`old_driver_on_new_kernel`]).
 #[cfg(not(windows))]
 pub fn install_state() -> InstallState {
-    if ovc_vcam::platform::linux_device().is_some() {
-        InstallState::Current
-    } else {
+    if ovc_vcam::platform::linux_device().is_none() {
         InstallState::Missing
+    } else if old_driver_on_new_kernel() {
+        InstallState::Outdated
+    } else {
+        InstallState::Current
     }
+}
+
+/// Kernels from 7.0 ship their own v4l2loopback; the DKMS build (0.12.7, under updates/)
+/// breaks on them after the camera is reopened. True when that build is the one in use.
+#[cfg(not(windows))]
+fn old_driver_on_new_kernel() -> bool {
+    let Ok(release) = std::fs::read_to_string("/proc/sys/kernel/osrelease") else { return false };
+    let release = release.trim();
+    let major: u32 = release.split('.').next().and_then(|m| m.parse().ok()).unwrap_or(0);
+    if major < 7 {
+        return false;
+    }
+    // modules.dep lines: "updates/dkms/v4l2loopback.ko.zst: kernel/drivers/media/...".
+    let dep = std::fs::read_to_string(format!("/lib/modules/{release}/modules.dep")).unwrap_or_default();
+    let in_use = dep
+        .lines()
+        .filter_map(|l| l.split(':').next())
+        .find(|p| p.rsplit('/').next().is_some_and(|f| f.starts_with("v4l2loopback.ko")));
+    in_use.is_some_and(|p| p.starts_with("updates/"))
+}
+
+/// Linux: the "Repair camera" helper the package installs next to the binary.
+#[cfg(not(windows))]
+fn driver_script() -> Option<PathBuf> {
+    Some(std::env::current_exe().ok()?.parent()?.join("tools/camera-driver.sh")).filter(|p| p.is_file())
 }
 
 /// Register (or with `uninstall`, unregister) the filter via an elevated `regsvr32`
@@ -397,21 +444,22 @@ pub fn install(uninstall: bool) -> Result<Arc<AtomicBool>, String> {
     Ok(busy)
 }
 
-/// Linux: create the "MarkCam" device now (normally done at boot by the package) with one
-/// password prompt (pkexec): v4l2loopback is (re)loaded with MarkCam's options from
-/// /etc/modprobe.d. Uninstall unloads it.
+/// Linux: create or repair the "MarkCam" device now (normally done at boot by the package)
+/// with one password prompt (pkexec). The package's camera-driver.sh also installs the
+/// kernel's own driver when there is one; otherwise v4l2loopback is (re)loaded with MarkCam's
+/// options from /etc/modprobe.d. Uninstall unloads it.
 #[cfg(not(windows))]
 pub fn install(uninstall: bool) -> Result<Arc<AtomicBool>, String> {
     let opts = "devices=1 video_nr=42 card_label=MarkCam exclusive_caps=1";
-    let script = if uninstall {
-        "modprobe -r v4l2loopback".to_string()
-    } else {
-        format!("modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback {opts}")
+    let args: Vec<String> = match (uninstall, driver_script()) {
+        (true, _) => vec!["sh".into(), "-c".into(), "modprobe -r v4l2loopback".into()],
+        (false, Some(script)) => vec![script.to_string_lossy().into_owned(), "--install-packages".into()],
+        (false, None) => vec!["sh".into(), "-c".into(), format!("modprobe -r v4l2loopback 2>/dev/null; modprobe v4l2loopback {opts}")],
     };
     let busy = Arc::new(AtomicBool::new(true));
     let done = busy.clone();
     std::thread::spawn(move || {
-        let _ = std::process::Command::new("pkexec").args(["sh", "-c", &script]).status();
+        let _ = std::process::Command::new("pkexec").args(&args).status();
         done.store(false, Ordering::SeqCst);
     });
     Ok(busy)

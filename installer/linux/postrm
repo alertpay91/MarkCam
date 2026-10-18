@@ -3,5 +3,7 @@ set -e
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
     # Leave the driver loaded if another program is using it; it isn't loaded at the next boot.
     modprobe -r v4l2loopback 2>/dev/null || true
+    # Our depmod.d override is gone: back to the default driver order.
+    depmod -a "$(uname -r)" 2>/dev/null || true
 fi
 exit 0

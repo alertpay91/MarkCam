@@ -2531,13 +2531,10 @@ impl Studio {
                             {
                                 self.about_open = true;
                             }
-                            if self.vcam_state == vcam::InstallState::Outdated
+                            if vcam::needs_update(self.vcam_state, &fx.vcam)
                                 && ui
-                                    .add(egui::Button::new(egui::RichText::new("Update camera").color(egui::Color32::WHITE)).fill(theme::ACCENT))
-                                    .on_hover_text(
-                                        "The installed virtual camera is an older copy (e.g. still named OpenVCam). \
-                                         Click once (admin) to switch it to this MarkCam, then restart ClassIn.",
-                                    )
+                                    .add(egui::Button::new(egui::RichText::new(vcam::UPDATE_LABEL).color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                                    .on_hover_text(vcam::UPDATE_HINT)
                                     .clicked()
                             {
                                 vcam_action = Some(false);
@@ -3524,8 +3521,8 @@ impl Studio {
                                     };
                                     ui.label(egui::RichText::new(line).color(theme::TEXT_DIM));
                                     ui.horizontal(|ui| {
-                                        if self.vcam_state == vcam::InstallState::Outdated
-                                            && ui.button("Update to this MarkCam (admin)").clicked()
+                                        if vcam::needs_update(self.vcam_state, &fx.vcam)
+                                            && ui.button(format!("{} (admin)", vcam::UPDATE_LABEL)).on_hover_text(vcam::UPDATE_HINT).clicked()
                                         {
                                             vcam_action = Some(false);
                                         }
@@ -4221,6 +4218,10 @@ impl Studio {
             fx.maker_preview = None;
         }
         if let Some(uninstall) = vcam_action {
+            // Let go of the device so the driver can be reloaded; output restarts afterwards.
+            fx.vcam.paused = true;
+            fx.vcam.stop();
+            fx.vcam.err = None;
             match vcam::install(uninstall) {
                 Ok(busy) => self.vcam_installing = Some(busy),
                 Err(e) => fx.vcam.err = Some(e),
@@ -4228,6 +4229,7 @@ impl Studio {
         }
         if self.vcam_installing.as_ref().is_some_and(|b| !b.load(Ordering::SeqCst)) {
             self.vcam_installing = None;
+            fx.vcam.paused = false;
             self.vcam_state = vcam::install_state();
         }
         if want_download && self.download.is_none() {
