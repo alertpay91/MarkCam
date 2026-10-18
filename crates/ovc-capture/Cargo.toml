@@ -15,6 +15,9 @@ nokhwa = { workspace = true, optional = true }
 # Same libjpeg-turbo binding nokhwa uses internally; driven directly for faster MJPEG decode.
 mozjpeg = { version = "0.10", optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [features]
 default = []
 camera = ["dep:nokhwa", "dep:mozjpeg"]

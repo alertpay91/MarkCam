@@ -3539,6 +3539,7 @@ name = "ovc-capture"
 version = "1.3.9"
 dependencies = [
  "anyhow",
+ "libc",
  "mozjpeg",
  "nokhwa",
  "ovc-core",

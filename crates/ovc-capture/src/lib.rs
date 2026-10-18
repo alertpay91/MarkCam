@@ -48,12 +48,47 @@ pub fn list_cameras() -> anyhow::Result<Vec<CameraInfo>> {
             .map(|c| CameraInfo { index: c.index().as_index().unwrap_or(0), name: c.human_name() })
             // Linux: MarkCam's own virtual camera is a v4l2loopback device like any webcam.
             .filter(|c| !(cfg!(target_os = "linux") && c.name.trim() == "MarkCam"))
+            // Linux: UVC webcams also expose a metadata node (C920: /dev/video1) with no picture.
+            .filter(|c| is_video_capture_node(c.index))
             .collect())
     }
     #[cfg(not(feature = "camera"))]
     {
         Ok(Vec::new())
     }
+}
+
+/// Whether `/dev/video<index>` delivers pictures (V4L2_CAP_VIDEO_CAPTURE in its device caps).
+/// Nodes we can't ask are kept, so a camera is never hidden by mistake.
+#[cfg(all(feature = "camera", target_os = "linux"))]
+fn is_video_capture_node(index: u32) -> bool {
+    use std::os::fd::AsRawFd;
+    /// struct v4l2_capability
+    #[repr(C)]
+    struct Cap {
+        driver: [u8; 16],
+        card: [u8; 32],
+        bus_info: [u8; 32],
+        version: u32,
+        capabilities: u32,
+        device_caps: u32,
+        reserved: [u32; 3],
+    }
+    const VIDIOC_QUERYCAP: libc::c_ulong = 0x8068_5600;
+    const CAP_VIDEO_CAPTURE: u32 = 0x1;
+    const CAP_DEVICE_CAPS: u32 = 0x8000_0000;
+    let Ok(f) = std::fs::File::open(format!("/dev/video{index}")) else { return true };
+    let mut cap: Cap = unsafe { std::mem::zeroed() };
+    if unsafe { libc::ioctl(f.as_raw_fd(), VIDIOC_QUERYCAP as _, &mut cap) } != 0 {
+        return true;
+    }
+    let caps = if cap.capabilities & CAP_DEVICE_CAPS != 0 { cap.device_caps } else { cap.capabilities };
+    caps & CAP_VIDEO_CAPTURE != 0
+}
+
+#[cfg(all(feature = "camera", not(target_os = "linux")))]
+fn is_video_capture_node(_index: u32) -> bool {
+    true
 }
 
 /// A physical camera decoded to RGBA8. Constructible only with the `camera` feature.
