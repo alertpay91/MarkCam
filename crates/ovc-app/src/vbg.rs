@@ -278,7 +278,11 @@ fn worker(
     let model = model_path().ok_or_else(|| anyhow::anyhow!("the background model is missing (reinstall MarkCam)"))?;
     ovc_ml::seg::init_runtime(&dir)?;
     let mut want_quality = quality.load(Ordering::SeqCst);
-    let mut cpu_only = integrated_gpu || std::env::var_os("OVC_VBG_CPU").is_some();
+    // Linux has no DirectML: the model always runs on the CPU there.
+    let mut cpu_only = integrated_gpu || !cfg!(windows) || std::env::var_os("OVC_VBG_CPU").is_some();
+    // A desktop processor (no laptop graphics, 8+ threads) runs the light RVM bigger and
+    // more often than a laptop; dropped again below if it can't keep up.
+    STRONG_CPU.store(!integrated_gpu && cpu_threads() >= 8 && std::env::var_os("OVC_VBG_WEAK_CPU").is_none(), Ordering::SeqCst);
     let mut engine = Engine::load_for(&model, want_quality, cpu_only)?;
     let mut gpu = engine.gpu();
     // Auto: the best model only while it keeps up with the camera (~30 fps).
@@ -289,6 +293,8 @@ fn worker(
     let gap_for = |e: &Engine, gpu: bool| {
         Duration::from_millis(match (e, gpu) {
             (Engine::Rvm(..), true) => 0,
+            // A desktop processor: up to ~25 mattes a second.
+            (Engine::Rvm(..), false) if STRONG_CPU.load(Ordering::SeqCst) => 40,
             // The fast model: up to 20 mattes a second.
             (Engine::Selfie(_), _) => 50,
             // CPU: ~10 mattes a second (the frames in between use the nearest one).
@@ -327,6 +333,17 @@ fn worker(
             model_avg = 0.0;
             ms_avg = 0.0;
             gpu_probe.clear();
+        }
+        // The bigger CPU plan doesn't keep up (judged after the warm-up): the laptop plan.
+        if !gpu && STRONG_CPU.load(Ordering::SeqCst) && matches!(engine, Engine::Rvm(..)) && best_checked == 30 && model_avg > 45.0 {
+            tracing::warn!("processor too slow for the bigger background model ({model_avg:.0} ms): smaller");
+            STRONG_CPU.store(false, Ordering::SeqCst);
+            engine = Engine::load_for(&model, want_quality, cpu_only)?;
+            min_gap = gap_for(&engine, gpu);
+            model_avg = 0.0;
+            ms_avg = 0.0;
+            prev = None;
+            last_size = (0, 0);
         }
         // A graphics chip that is much too slow for the model (after its warm-up): use the
         // CPU instead, for good.
@@ -483,7 +500,7 @@ impl Engine {
     /// the fast model on laptops (integrated graphics / no usable GPU).
     fn load_for(modnet: &Path, quality: u8, cpu: bool) -> anyhow::Result<Engine> {
         let selfie = modnet.parent().map(|d| d.join(SELFIE_MODEL)).filter(|p| p.is_file());
-        if quality == QUALITY_LIGHT || (quality == QUALITY_AUTO && cpu) {
+        if quality == QUALITY_LIGHT || (quality == QUALITY_AUTO && cpu && !STRONG_CPU.load(Ordering::SeqCst)) {
             if let Some(p) = &selfie {
                 match ovc_ml::seg::PersonSegmenter::load_selfie(p, 1) {
                     Ok(s) => return Ok(Engine::Selfie(s)),
@@ -503,18 +520,18 @@ impl Engine {
             let is_best = rvm.file_name().is_some_and(|n| n == RVM_BEST_MODEL);
             // Input at the refine size; the model looks at half of it and refines back up.
             if cpu {
-                // The light model on the CPU, small (448 wide): ~15 ms on a desktop, ~30 ms
-                // on a 7th-gen laptop.
+                // The light model on the CPU, small (384 wide): ~15 ms on a desktop, ~30 ms
+                // on a 7th-gen laptop; bigger on a desktop processor.
                 let light = dir.join(RVM_MODEL);
                 if light.is_file() {
-                    return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&light, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 1)?, false));
+                    return Ok(Engine::Rvm(cpu_matter(&light)?, false));
                 }
             }
             match ovc_ml::seg::VideoMatter::load(&rvm, 640, 360, tune().ratio, !cpu, 2) {
                 Ok(m) if m.backend == ovc_ml::seg::Backend::Gpu => return Ok(Engine::Rvm(m, is_best)),
                 // No usable graphics chip: the light model on the CPU.
                 Ok(_) if is_best => return Engine::load(modnet, false, true),
-                Ok(_) => return Ok(Engine::Rvm(ovc_ml::seg::VideoMatter::load(&rvm, CPU_WIDTH, CPU_WIDTH * 9 / 16, 0.35, false, 1)?, false)),
+                Ok(_) => return Ok(Engine::Rvm(cpu_matter(&rvm)?, false)),
                 Err(e) => tracing::warn!("RVM: {e}; falling back to MODNet"),
             }
         }
@@ -534,7 +551,7 @@ impl Engine {
         if self.gpu() {
             tune().width
         } else {
-            CPU_WIDTH.min(tune().width)
+            cpu_plan().0.min(tune().width)
         }
     }
 
@@ -716,6 +733,30 @@ fn shape(v: f32) -> f32 {
 
 /// Matte width on the CPU.
 const CPU_WIDTH: usize = 384;
+/// Matte width on a desktop processor (Linux, or Windows without a usable graphics chip).
+const STRONG_CPU_WIDTH: usize = 512;
+
+/// The processor is a desktop one (see the worker); decides [`cpu_plan`].
+static STRONG_CPU: AtomicBool = AtomicBool::new(false);
+
+fn cpu_threads() -> usize {
+    std::thread::available_parallelism().map_or(1, |n| n.get())
+}
+
+/// CPU matting: (width, downsample ratio, threads). The ratio keeps the model's inner
+/// picture near 180-200 px wide.
+fn cpu_plan() -> (usize, f32, usize) {
+    if STRONG_CPU.load(Ordering::SeqCst) {
+        (STRONG_CPU_WIDTH, 0.375, (cpu_threads() / 4).clamp(2, 4))
+    } else {
+        (CPU_WIDTH, 0.35, 1)
+    }
+}
+
+fn cpu_matter(model: &Path) -> anyhow::Result<ovc_ml::seg::VideoMatter> {
+    let (w, ratio, threads) = cpu_plan();
+    ovc_ml::seg::VideoMatter::load(model, w, w * 9 / 16, ratio, false, threads)
+}
 /// Edge refinement width for the fast model.
 const SELFIE_WIDTH: usize = 384;
 

@@ -4263,8 +4263,8 @@ impl Studio {
         // Person segmentation, while a virtual background is chosen (shut down 3 s after).
         let want_bg = fx.vbg.needs_matte();
         if want_bg && self.seg.is_none() {
-            // (Linux: no DirectML — the models run on the CPU.)
-            let integrated = fx.gpu.adapter_info.to_string().contains("IntegratedGpu") || !cfg!(windows);
+            // (Linux: no DirectML — the models run on the CPU; a desktop one gets the bigger plan.)
+            let integrated = fx.gpu.adapter_info.to_string().contains("IntegratedGpu");
             let w = vbg::SegWorker::start(self.cap.latest.clone(), fx.vbg.quality, integrated);
             fx.vbg.matte_src = Some(w.matte.clone());
             self.seg = Some(w);
