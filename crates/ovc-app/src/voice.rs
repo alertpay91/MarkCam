@@ -32,14 +32,15 @@ pub const BEST: u8 = 2;
 
 const RATE: f32 = 48_000.0;
 const FRAME: usize = 480;
+/// White noise amplitude before the dither's 30 Hz low-pass (~-60 dB after it).
+const DITHER_AMP: f32 = 0.07;
 /// Strength steps 1..=5: the most the noise is lowered (dB) and DeepFilterNet's post-filter
 /// (cleans what is left in loud noise; 0 = off). Stronger takes out louder typing but can
 /// color the voice when the noise is loud.
 const STRENGTHS: [(f32, f32); 5] = [(15.0, 0.0), (22.0, 0.0), (30.0, 0.0), (40.0, 0.02), (55.0, 0.04)];
-/// Best is gentler: DeepFilterNet takes the room down so far in pauses that it audibly comes
-/// back with the voice ("breathing", heard as a rustle when you start talking). A smaller
-/// gap between pause and speech keeps it natural; the post-filter only on Strong.
-const STRENGTHS_BEST: [(f32, f32); 5] = [(12.0, 0.0), (16.0, 0.0), (20.0, 0.0), (26.0, 0.0), (34.0, 0.02)];
+/// Best: DeepFilterNet already removes more by itself, so its limits are a little lower; the
+/// post-filter only on Strong.
+const STRENGTHS_BEST: [(f32, f32); 5] = [(14.0, 0.0), (20.0, 0.0), (26.0, 0.0), (32.0, 0.0), (40.0, 0.02)];
 pub const DEFAULT_STRENGTH: u8 = 3;
 
 fn strength(mode: u8, level: u8) -> (f32, f32) {
@@ -341,8 +342,11 @@ pub struct Voice {
     frame_out: Vec<f32>,
     /// The input, delayed like the model's output.
     dry: VecDeque<f32>,
-    /// Noise generator state (see denoise_frame).
+    /// Noise generator state and its filters (see denoise_frame).
     dither: u32,
+    dither_lp: [Biquad; 2],
+    /// Takes the sub-audible dither back out after the model.
+    post_hp: [Biquad; 2],
 }
 
 impl Voice {
@@ -379,6 +383,8 @@ impl Voice {
             frame_out: vec![0.0; FRAME],
             dry,
             dither: 0x1234_5678,
+            dither_lp: [Biquad::lowpass(20.0), Biquad::lowpass(20.0)],
+            post_hp: [Biquad::highpass(70.0), Biquad::highpass(70.0)],
         }
     }
 
@@ -456,11 +462,15 @@ impl Voice {
             Denoiser::Best(m) => {
                 // DeepFilterNet outputs hard zeros for input below -70 dB and jumps back when
                 // a sound comes: in a quiet room that turns every mouse click into a pop. A
-                // faint hiss (-66 dB, removed by the model itself) keeps it running smoothly.
+                // faint rumble below hearing (~-60 dB, under 30 Hz) keeps it running; a high-
+                // pass after the model takes it out again. (White noise did the same job but
+                // the model lets its highs through while you talk: a hiss on the voice.)
                 if !(cfg!(test) && std::env::var_os("OVC_NO_DITHER").is_some()) {
                     for v in self.frame_in.iter_mut() {
                         self.dither = self.dither.wrapping_mul(1664525).wrapping_add(1013904223);
-                        *v += ((self.dither >> 9) as f32 / (1 << 23) as f32 - 0.5) * 1.7e-3;
+                        let w = ((self.dither >> 9) as f32 / (1 << 23) as f32 - 0.5) * DITHER_AMP;
+                        let [lp0, lp1] = &mut self.dither_lp;
+                        *v += lp1.run(lp0.run(w));
                     }
                 }
                 let noisy = ndarray::ArrayView2::from_shape((1, FRAME), &self.frame_in[..]).expect("frame shape");
@@ -468,6 +478,10 @@ impl Voice {
                 match m.process(noisy, enh.view_mut()) {
                     Ok(_) => self.frame_out.copy_from_slice(enh.as_slice().unwrap_or(&dry)),
                     Err(_) => self.frame_out.copy_from_slice(&dry),
+                }
+                let [hp0, hp1] = &mut self.post_hp;
+                for o in self.frame_out.iter_mut() {
+                    *o = hp1.run(hp0.run(*o));
                 }
             }
         }
