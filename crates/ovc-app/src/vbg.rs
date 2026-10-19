@@ -465,8 +465,10 @@ fn worker(
         if gpu && gpu_probe.len() < 6 && !gpu_probe.iter().any(|v| v.is_nan()) {
             gpu_probe.push(model_ms);
         }
-        // Each frame may wait for its own matte only when they come at camera speed.
-        fast.store(gpu && model_avg > 0.0 && model_avg < 25.0, Ordering::SeqCst);
+        // On the graphics chip each frame waits for its own matte (at most ~4 frames, see
+        // sync_with_matte). It used to need < 25 ms per matte: RVM Best takes 20-28 ms on a
+        // GTX 1070, so any extra load flipped it off and the outline trailed ("ghosts").
+        fast.store(gpu && model_avg > 0.0, Ordering::SeqCst);
         best_checked += 1;
         if (11..=40).contains(&best_checked) {
             best_sum += model_ms;
