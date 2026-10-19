@@ -332,6 +332,9 @@ pub struct Voice {
     denoise: Denoiser,
     hp: Biquad,
     guard: VoiceGuard,
+    /// Best: how much of the model's output is used (1) versus the steadily turned-down
+    /// room (0, in pauses).
+    wet_mix: f32,
     clicks: Clicks,
     presence: Biquad,
     dyn_: Dynamics,
@@ -374,6 +377,7 @@ impl Voice {
             denoise,
             hp: Biquad::highpass(80.0),
             guard: VoiceGuard::new(),
+            wet_mix: 1.0,
             clicks: Clicks::new(level),
             presence: Biquad::peaking(3000.0, 1.0, 2.0),
             dyn_: Dynamics::new(),
@@ -432,7 +436,7 @@ impl Voice {
             self.pending.drain(..FRAME);
             self.denoise_frame();
             for i in 0..FRAME {
-                let y = self.clicks.run(self.frame_out[i]);
+                let y = if cfg!(test) && std::env::var_os("OVC_NO_CLICKS").is_some() { self.frame_out[i] } else { self.clicks.run(self.frame_out[i]) };
                 let y = self.presence.run(y);
                 let y = self.dyn_.run(y);
                 self.ready.push_back(y);
@@ -488,11 +492,32 @@ impl Voice {
         if !(cfg!(test) && std::env::var_os("OVC_NO_GUARD").is_some()) {
             self.guard.run(&dry, &mut self.frame_out);
         }
+        // In pauses DeepFilterNet's leftover noise flickers from frame to frame (5 dB jumps
+        // every 10 ms against 1 dB in the room itself): heard as a rustle. There the room,
+        // turned down evenly by the strength limit, replaces it; with a voice the model's
+        // output comes back at once.
+        let steady = matches!(self.denoise, Denoiser::Best(_)) && !(cfg!(test) && std::env::var_os("OVC_NO_STEADY").is_some());
+        let (start, end) = if steady {
+            let ed: f32 = dry.iter().map(|v| v * v).sum::<f32>() + 1e-12;
+            let ew: f32 = self.frame_out.iter().map(|v| v * v).sum::<f32>();
+            // Kept energy: a voice even as loud as the noise keeps > -4 dB, pauses -15 dB
+            // and less. Full wet above -6 dB, none below -14 dB.
+            let kept_db = 10.0 * (ew / ed + 1e-12).log10();
+            let target = ((kept_db + 14.0) / 8.0).clamp(0.0, 1.0);
+            let start = self.wet_mix;
+            // Open at once, settle back over ~80 ms.
+            self.wet_mix = if target > start { target } else { start + (target - start) * 0.12 };
+            (start, self.wet_mix)
+        } else {
+            (1.0, 1.0)
+        };
         // Never lower the noise by more than the limit: a little of the room stays, so
         // pauses don't fall into dead silence (that sounds like a gate).
         let floor = 10f32.powf(-self.atten_db / 20.0);
-        for (o, d) in self.frame_out.iter_mut().zip(&dry) {
-            *o += floor * (d - *o);
+        let n = FRAME as f32;
+        for (i, (o, d)) in self.frame_out.iter_mut().zip(&dry).enumerate() {
+            let w = start + (end - start) * (i as f32 + 1.0) / n;
+            *o = w * (*o + floor * (d - *o)) + (1.0 - w) * floor * d;
         }
     }
 }
@@ -515,6 +540,29 @@ pub fn write_wav(path: &std::path::Path, stereo: &[f32]) -> std::io::Result<()> 
     b.extend_from_slice(&data_len.to_le_bytes());
     for s in stereo {
         b.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
+    std::fs::write(path, b)
+}
+
+/// 32-bit float WAV (tuning: quiet pauses stay above 16-bit rounding).
+#[cfg(test)]
+fn write_wav_f32(path: &std::path::Path, stereo: &[f32]) -> std::io::Result<()> {
+    let data_len = (stereo.len() * 4) as u32;
+    let mut b = Vec::with_capacity(44 + data_len as usize);
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + data_len).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&3u16.to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&48_000u32.to_le_bytes());
+    b.extend_from_slice(&(48_000u32 * 8).to_le_bytes());
+    b.extend_from_slice(&8u16.to_le_bytes());
+    b.extend_from_slice(&32u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data_len.to_le_bytes());
+    for v in stereo {
+        b.extend_from_slice(&v.to_le_bytes());
     }
     std::fs::write(path, b)
 }
@@ -581,7 +629,11 @@ mod tests {
                     db(pause_in, pause_out)
                 );
                 let out = p.with_file_name(format!("voice-{}-{level}.wav", if mode == BEST { "best" } else { "light" }));
-                write_wav(&out, &s).expect("write");
+                if std::env::var_os("OVC_VOICE_F32").is_some() {
+                    write_wav_f32(&out, &s).expect("write");
+                } else {
+                    write_wav(&out, &s).expect("write");
+                }
             }
         }
     }
