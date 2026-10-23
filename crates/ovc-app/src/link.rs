@@ -51,7 +51,7 @@ fn resolve(url: &str, max_h: u32) -> anyhow::Result<Input> {
 }
 
 fn resolve_once(url: &str, max_h: u32) -> anyhow::Result<Input> {
-    let out = hidden(Command::new(crate::tools::ytdlp()).args([
+    let out = hidden(crate::tools::ytdlp_command().args([
         "-J",
         "--no-playlist",
         "--no-warnings",
@@ -163,7 +163,7 @@ impl Download {
                 std::fs::create_dir_all(&dir)?;
                 let started = std::time::SystemTime::now();
                 let mut child = hidden(
-                    Command::new(crate::tools::ytdlp())
+                    crate::tools::ytdlp_command()
                         // Titles with emoji / non-Latin letters must come back intact on the pipe.
                         .env("PYTHONIOENCODING", "utf-8")
                         .env("PYTHONUTF8", "1"),
@@ -423,7 +423,7 @@ fn spawn(input: &Input, looped: bool, at: f64) -> anyhow::Result<Running> {
     let (pipe_in, piped): (Vec<String>, bool) = match input {
         Input::Urls { urls, .. } => (urls.clone(), false),
         Input::ViaYtdlp { page, max_h } => {
-            let mut y = Command::new(crate::tools::ytdlp());
+            let mut y = crate::tools::ytdlp_command();
             y.args(["-q", "--no-warnings", "--no-playlist", "--no-part", "-f", &format!("b[height<={max_h}]/b"), "-o", "-"])
                 .arg(page)
                 .stdin(Stdio::null())
@@ -764,5 +764,22 @@ mod tests {
         assert_eq!(super::parse_duration("  Duration: 00:03:21.50, start: 0.000000, bitrate: 1 kb/s"), Some(201.5));
         assert_eq!(super::parse_duration("  Duration: N/A, start: 0.000000"), None);
         assert_eq!(super::parse_duration("Stream #0:0"), None);
+    }
+
+    /// A video YouTube serves only after its JavaScript challenge (network; ignored by
+    /// default). Fetches the tools (deno included) first when missing.
+    #[test]
+    #[ignore]
+    fn link_needing_javascript_resolves() {
+        use std::sync::atomic::Ordering;
+        if !crate::tools::ready() {
+            let f = crate::tools::Fetch::start();
+            while f.active.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+        assert!(crate::tools::deno().is_file(), "deno was not fetched");
+        let r = super::resolve_once("https://www.youtube.com/watch?v=79nLO3-tuoY", 720);
+        assert!(r.is_ok(), "{:?}", r.err());
     }
 }

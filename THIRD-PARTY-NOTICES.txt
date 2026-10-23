@@ -17,6 +17,7 @@ Code and models (each under its own license; full texts in the "licenses" folder
 - VB-CABLE (MarkCam Microphone) — VB-Audio Software, donationware.
   Origin: www.vb-cable.com. If you find it useful, please support VB-Audio there.
 - FFmpeg — GPL (gyan.dev build; on Linux the system's ffmpeg package); yt-dlp — The Unlicense.
+- Deno (the JavaScript runtime yt-dlp uses for YouTube; downloaded on first use) — Deno Land Inc., MIT License.
 - Rust crates (egui, wgpu, image, tiny-skia, ab_glyph, tract, ort, nokhwa, x11rb,
   libpulse-binding, …) — MIT / Apache-2.0; see Cargo.lock in the source code.
 - Linux only, installed from the system's own packages (not shipped with MarkCam):

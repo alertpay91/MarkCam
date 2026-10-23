@@ -1,7 +1,8 @@
-//! Helper programs fetched on demand (the first time a link is played), never bundled:
+//! Helper programs fetched on demand (the first time a link is played):
 //! **yt-dlp** (turns a YouTube / Twitch / Facebook… page link, live or not, into stream
-//! URLs) and **ffmpeg** (decodes any of them — and any local video — into raw frames and
-//! audio for MarkCam). Both are free, open source, and kept in `%APPDATA%\MarkCam\tools`.
+//! URLs), **ffmpeg** (decodes any of them — and any local video — into raw frames and
+//! audio for MarkCam) and **deno** (the JavaScript runtime yt-dlp needs for YouTube's
+//! challenges). All free, open source, and kept in `%APPDATA%\MarkCam\tools`.
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -13,9 +14,18 @@ const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/downlo
 #[cfg(not(windows))]
 const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
 const FFMPEG_URL: &str = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip";
+#[cfg(windows)]
+const DENO_URL: &str = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
+#[cfg(not(windows))]
+const DENO_URL: &str = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip";
 
 const YTDLP: &str = if cfg!(windows) { "yt-dlp.exe" } else { "yt-dlp" };
 const FFMPEG: &str = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+const DENO: &str = if cfg!(windows) { "deno.exe" } else { "deno" };
+
+/// Deno's download was tried this session (it is optional: links that need no JavaScript
+/// still play without it, so a failed download doesn't block them).
+static DENO_TRIED: AtomicBool = AtomicBool::new(false);
 
 pub fn dir() -> PathBuf {
     crate::settings::app_dir().join("tools")
@@ -72,6 +82,25 @@ pub fn ffmpeg_has_catchup() -> bool {
     })
 }
 
+/// YouTube now requires running its JavaScript for many videos ("This video is not
+/// available" otherwise); yt-dlp does that with an outside runtime.
+pub fn deno() -> PathBuf {
+    dir().join(DENO)
+}
+
+/// yt-dlp with the JavaScript runtime to use: MarkCam's own deno, else whatever deno or
+/// node the computer has.
+pub fn ytdlp_command() -> std::process::Command {
+    let mut cmd = std::process::Command::new(ytdlp());
+    let d = deno();
+    if d.is_file() {
+        cmd.arg("--js-runtimes").arg(format!("deno:{}", d.display()));
+    } else {
+        cmd.args(["--js-runtimes", "deno", "--js-runtimes", "node"]);
+    }
+    cmd
+}
+
 /// The folder ffmpeg is in (for yt-dlp's `--ffmpeg-location`).
 pub fn ffmpeg_dir() -> PathBuf {
     ffmpeg().parent().map(PathBuf::from).unwrap_or_else(dir)
@@ -105,7 +134,7 @@ pub fn update_ytdlp(force: bool) -> bool {
 }
 
 pub fn ready() -> bool {
-    ytdlp().is_file() && ffmpeg().is_file()
+    ytdlp().is_file() && ffmpeg().is_file() && (deno().is_file() || DENO_TRIED.load(Ordering::SeqCst))
 }
 
 /// A background download of whichever tools are missing.
@@ -135,8 +164,20 @@ impl Fetch {
                         let zip = dir().join("ffmpeg.zip");
                         download(FFMPEG_URL, &zip, "ffmpeg", &status)?;
                         *status.lock().unwrap() = "unpacking ffmpeg…".into();
-                        extract_ffmpeg(&zip)?;
+                        extract(&zip, "/bin/ffmpeg.exe", &ffmpeg())?;
                         let _ = std::fs::remove_file(&zip);
+                    }
+                    if !deno().is_file() {
+                        DENO_TRIED.store(true, Ordering::SeqCst);
+                        let zip = dir().join("deno.zip");
+                        let got = download(DENO_URL, &zip, "deno (for YouTube)", &status).and_then(|_| {
+                            *status.lock().unwrap() = "unpacking deno…".into();
+                            extract(&zip, DENO, &deno())
+                        });
+                        let _ = std::fs::remove_file(&zip);
+                        if let Err(e) = got {
+                            tracing::warn!("deno: {e} (some YouTube videos may not play)");
+                        }
                     }
                     Ok(())
                 })();
@@ -184,17 +225,23 @@ fn download(url: &str, dst: &std::path::Path, what: &str, status: &Mutex<String>
     Ok(())
 }
 
-/// Pull just `bin/ffmpeg.exe` out of the release zip.
-fn extract_ffmpeg(zip_path: &std::path::Path) -> anyhow::Result<()> {
+/// Pull the one file whose path ends with `suffix` (`/bin/ffmpeg.exe`, `deno.exe`) out of
+/// a release zip into `dst`.
+fn extract(zip_path: &std::path::Path, suffix: &str, dst: &std::path::Path) -> anyhow::Result<()> {
     let mut z = zip::ZipArchive::new(std::fs::File::open(zip_path)?)?;
     let idx = (0..z.len())
-        .find(|&i| z.by_index(i).ok().is_some_and(|f| f.name().to_ascii_lowercase().ends_with("/bin/ffmpeg.exe")))
-        .ok_or_else(|| anyhow::anyhow!("ffmpeg.exe not found in the download"))?;
+        .find(|&i| z.by_index(i).ok().is_some_and(|f| f.name().to_ascii_lowercase().ends_with(suffix)))
+        .ok_or_else(|| anyhow::anyhow!("{suffix} not found in the download"))?;
     let mut f = z.by_index(idx)?;
-    let tmp = ffmpeg().with_extension("part");
+    let tmp = dst.with_extension("part");
     let mut out = std::fs::File::create(&tmp)?;
     std::io::copy(&mut f, &mut out)?;
     drop(out);
-    std::fs::rename(tmp, ffmpeg())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    std::fs::rename(tmp, dst)?;
     Ok(())
 }
