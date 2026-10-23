@@ -110,27 +110,54 @@ pub fn ffmpeg_dir() -> PathBuf {
 /// failed); otherwise at most once a week. Blocking; call from a background thread.
 pub fn update_ytdlp(force: bool) -> bool {
     let exe = ytdlp();
-    if !exe.is_file() {
+    if !exe.is_file() || (!force && fresh("yt-dlp.updated", 7)) {
         return false;
     }
-    let stamp = dir().join("yt-dlp.updated");
-    let fresh = std::fs::metadata(&stamp)
+    let ok = run_quiet(&exe, &["-U"]);
+    let _ = std::fs::write(dir().join("yt-dlp.updated"), b"");
+    ok
+}
+
+/// A link still fails after the normal update: yt-dlp's nightly build usually has the fix
+/// for a YouTube change a day or two before the stable one. At most once a day; later
+/// updates (`-U`) then stay on nightly.
+pub fn update_ytdlp_nightly() -> bool {
+    let exe = ytdlp();
+    if !exe.is_file() || fresh("yt-dlp.nightly", 1) {
+        return false;
+    }
+    let ok = run_quiet(&exe, &["--update-to", "nightly"]);
+    let _ = std::fs::write(dir().join("yt-dlp.nightly"), b"");
+    ok
+}
+
+/// Keep MarkCam's deno current, at most once a month (`deno upgrade` replaces itself).
+pub fn update_deno() {
+    let exe = deno();
+    if exe.is_file() && !fresh("deno.updated", 30) {
+        run_quiet(&exe, &["upgrade", "--quiet"]);
+        let _ = std::fs::write(dir().join("deno.updated"), b"");
+    }
+}
+
+/// Whether the stamp file `name` in the tools folder is younger than `days`.
+fn fresh(name: &str, days: u64) -> bool {
+    std::fs::metadata(dir().join(name))
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.elapsed().ok())
-        .is_some_and(|age| age < std::time::Duration::from_secs(7 * 24 * 3600));
-    if fresh && !force {
-        return false;
-    }
+        .is_some_and(|age| age < std::time::Duration::from_secs(days * 24 * 3600))
+}
+
+/// Run a helper without a console window; true when it succeeded.
+fn run_quiet(exe: &std::path::Path, args: &[&str]) -> bool {
     let mut cmd = std::process::Command::new(exe);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let ok = cmd.arg("-U").output().is_ok_and(|o| o.status.success());
-    let _ = std::fs::write(&stamp, b"");
-    ok
+    cmd.args(args).output().is_ok_and(|o| o.status.success())
 }
 
 pub fn ready() -> bool {

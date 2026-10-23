@@ -44,8 +44,11 @@ fn format_args(max_h: u32) -> [String; 4] {
 /// headers yt-dlp used to get them (YouTube can refuse a request that looks different).
 fn resolve(url: &str, max_h: u32) -> anyhow::Result<Input> {
     match resolve_once(url, max_h) {
-        // YouTube changed something: update yt-dlp and try once more.
-        Err(_) if crate::tools::update_ytdlp(true) => resolve_once(url, max_h),
+        // YouTube changed something: update yt-dlp and try once more, then its nightly build.
+        Err(_) if crate::tools::update_ytdlp(true) => match resolve_once(url, max_h) {
+            Err(_) if crate::tools::update_ytdlp_nightly() => resolve_once(url, max_h),
+            r => r,
+        },
         r => r,
     }
 }

@@ -1618,7 +1618,7 @@ impl Studio {
             video_dl: None,
             last_download: None,
             download_dir: None,
-            bg_preview_fps: 15,
+            bg_preview_fps: 30,
             autostart: autostart::enabled(),
             start_minimized: std::env::args().any(|a| a == autostart::MINIMIZED_FLAG),
             seg: None,
@@ -1755,7 +1755,7 @@ impl Studio {
             self.banner_sel = c.banner_sel.min(self.banners.len() - 1);
         }
         self.category = c.category.clone();
-        self.bg_preview_fps = c.background_preview_fps;
+        self.bg_preview_fps = c.preview_fps_behind;
         fx.idle_camera = c.idle_camera;
         fx.vbg.choice = vbg::Choice::from_id(&c.background);
         fx.vbg.blur = c.background_blur;
@@ -2084,7 +2084,7 @@ impl Studio {
                 .collect(),
             tab: self.tab.id().into(),
             category: self.category.clone(),
-            background_preview_fps: self.bg_preview_fps,
+            preview_fps_behind: self.bg_preview_fps,
             idle_camera: fx.idle_camera,
             download_dir: self.download_dir.clone(),
             background: fx.vbg.choice.id(),
@@ -2255,8 +2255,8 @@ impl Studio {
         let mut fx_guard = fx_arc.lock().unwrap();
         let fx: &mut Fx = &mut fx_guard;
         // How often the capture thread hands over a preview: every frame while MarkCam is
-        // in front, at the Setup choice behind another window (15 fps by default: 10 looked
-        // choppy next to ClassIn, 30 doubled the app's CPU), never while minimized. The
+        // in front, at the Setup choice behind another window (30 fps by default: 15 looked
+        // like a bug to people; 15 / 5 save CPU on a laptop), never while minimized. The
         // virtual camera gets every frame regardless.
         let (minimized, focused) =
             ctx.input(|i| (i.viewport().minimized.unwrap_or(false), i.viewport().focused.unwrap_or(true)));
@@ -2522,6 +2522,16 @@ impl Studio {
                             };
                             if resp.clicked() {
                                 fx.vcam.on = !fx.vcam.on;
+                            }
+                            // A newer MarkCam on GitHub: one click to its download page.
+                            if let Some(v) = NEWER_VERSION.lock().unwrap().clone() {
+                                if ui
+                                    .add(egui::Button::new(egui::RichText::new(format!("⬆ MarkCam {v} is out")).color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                                    .on_hover_text("Opens the download page. Install it after your class: installing restarts the camera.")
+                                    .clicked()
+                                {
+                                    ui.ctx().open_url(egui::OpenUrl::new_tab(RELEASES_URL));
+                                }
                             }
                             // About / support, always in sight next to the camera status.
                             if ui
@@ -3078,7 +3088,7 @@ impl Studio {
                             }
                         } else {
                             ui.label(
-                                egui::RichText::new("On the preview: click to select, drag to move, scroll or corner handle to resize, Delete to remove")
+                                egui::RichText::new("On the preview: click to select, drag to move, scroll or corner handle to resize, × or Delete to remove")
                                     .small()
                                     .color(theme::TEXT_DIM),
                             );
@@ -3813,8 +3823,26 @@ impl Studio {
                 }
             }
 
+            // The selected effect's remove button (top-right corner of its outline, on screen).
+            let remove_btn = self.selected.and_then(|i| fx.overlays.get(i)).and_then(|ov| ov.hit_rect()).map(|r| {
+                let outline = egui::Rect::from_two_pos(n2s(r[0], r[1]), n2s(r[2], r[3]));
+                outline.right_top()
+            });
+            let on_remove_btn = |p: egui::Pos2| remove_btn.is_some_and(|c| c.distance(p) <= 12.0);
+            let mut removed_now = false;
+            if (response.clicked() || response.drag_started()) && !maker_drag {
+                if let (Some(p), Some(i)) = (response.interact_pointer_pos(), self.selected) {
+                    if on_remove_btn(p) && i < fx.overlays.len() {
+                        fx.overlays.remove(i);
+                        self.selected = None;
+                        self.drag_mode = None;
+                        removed_now = true;
+                    }
+                }
+            }
+
             // Begin a drag: a corner handle on the selected overlay resizes; a body hit moves.
-            if response.drag_started() && !maker_drag {
+            if response.drag_started() && !maker_drag && !removed_now {
                 if let Some(p) = response.interact_pointer_pos() {
                     let (u, v) = s2n(p);
                     self.drag_mode = None;
@@ -3870,7 +3898,7 @@ impl Studio {
             }
             // A plain click selects the effect under the pointer (topmost), or clears the
             // selection on empty picture.
-            if response.clicked() {
+            if response.clicked() && !removed_now {
                 if let Some(p) = response.interact_pointer_pos() {
                     let (u, v) = s2n(p);
                     self.selected = fx.overlays.iter().enumerate().rev().find_map(|(i, ov)| {
@@ -3908,6 +3936,14 @@ impl Studio {
                         painter.circle_filled(b, 7.0, theme::ACCENT);
                         painter.circle_stroke(b, 7.0, egui::Stroke::new(1.5_f32, egui::Color32::WHITE));
                     }
+                    // Remove button, top right (Delete does the same).
+                    let c = egui::Rect::from_two_pos(a, b).right_top();
+                    let hot = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| p.distance(c) <= 12.0);
+                    painter.circle_filled(c, 10.0, if hot { egui::Color32::from_rgb(230, 70, 70) } else { egui::Color32::from_rgb(190, 50, 50) });
+                    painter.circle_stroke(c, 10.0, egui::Stroke::new(1.5_f32, egui::Color32::WHITE));
+                    let (d, w) = (4.0, egui::Stroke::new(2.0_f32, egui::Color32::WHITE));
+                    painter.line_segment([c + egui::vec2(-d, -d), c + egui::vec2(d, d)], w);
+                    painter.line_segment([c + egui::vec2(-d, d), c + egui::vec2(d, -d)], w);
                 }
             }
         });
@@ -4320,6 +4356,48 @@ const AUTHOR: &str = "Marko Stevanović";
 const DONATE_EMAIL: &str = "alertpay91@gmail.com";
 /// Where the source code is published (GPL-3.0). Empty: the copy installed with MarkCam.
 const SOURCE_URL: &str = "https://github.com/alertpay91/MarkCam";
+const RELEASES_URL: &str = "https://github.com/alertpay91/MarkCam/releases/latest";
+
+/// A newer MarkCam on GitHub (its version), found by [`check_for_new_version`].
+static NEWER_VERSION: Mutex<Option<String>> = Mutex::new(None);
+
+/// Public builds look once a day whether GitHub has a newer release; the app then offers a
+/// download button. Nothing is installed on its own (that would cut the camera in a class).
+fn check_for_new_version() {
+    if !PUBLIC {
+        return;
+    }
+    let stamp = settings::app_dir().join("version-check");
+    let fresh = std::fs::metadata(&stamp)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < std::time::Duration::from_secs(20 * 3600));
+    let latest = if fresh {
+        std::fs::read_to_string(&stamp).ok()
+    } else {
+        let tag = ureq::get("https://api.github.com/repos/alertpay91/MarkCam/releases/latest")
+            .timeout(std::time::Duration::from_secs(20))
+            .call()
+            .ok()
+            .and_then(|r| r.into_string().ok())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|j| j["tag_name"].as_str().map(|s| s.trim_start_matches('v').to_string()));
+        if let Some(t) = &tag {
+            let _ = std::fs::write(&stamp, t);
+        }
+        tag
+    };
+    if let Some(v) = latest.map(|s| s.trim().to_string()).filter(|v| version_newer(v, env!("CARGO_PKG_VERSION"))) {
+        *NEWER_VERSION.lock().unwrap() = Some(v);
+    }
+}
+
+/// "1.4.10" > "1.4.9".
+fn version_newer(a: &str, b: &str) -> bool {
+    let parse = |s: &str| s.split('.').map(|p| p.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
+    parse(a) > parse(b)
+}
 /// PayPal's "Donate" button doesn't work for Serbia ("Donations aren't supported in this
 /// organization's country"); a plain payment ("Buy Now") link does.
 fn coffee_url(eur: u32) -> String {
@@ -4776,9 +4854,15 @@ fn main() -> eframe::Result<()> {
     }
     // Installed with bundled effects: give a fresh user their "My effects" and categories.
     library::seed_from_bundle();
-    // Keep yt-dlp current (weekly, in the background) so links keep working.
+    // Upkeep in the background, also while MarkCam runs for days: yt-dlp weekly and deno
+    // monthly (links keep working when YouTube changes), and a daily look for a newer MarkCam.
     if std::env::var_os("OVC_TEST").is_none() {
-        thread::spawn(|| tools::update_ytdlp(false));
+        let _ = thread::Builder::new().name("markcam-upkeep".into()).spawn(|| loop {
+            tools::update_ytdlp(false);
+            tools::update_deno();
+            check_for_new_version();
+            thread::sleep(std::time::Duration::from_secs(6 * 3600));
+        });
     }
     let mut viewport = egui::ViewportBuilder::default().with_inner_size([1240.0, 760.0]).with_min_inner_size([900.0, 560.0]);
     // Linux: the window's icon and the id that ties it to markcam.desktop (taskbar, dock).
@@ -4875,6 +4959,14 @@ mod tests {
         println!("peak heard on MarkCam Microphone: {heard:.3} (sent 0.200)");
         drop(engine);
         assert!(heard > 0.05, "nothing came through the virtual cable");
+    }
+
+    #[test]
+    fn versions_compare() {
+        assert!(version_newer("1.4.10", "1.4.9"));
+        assert!(version_newer("1.5.0", "1.4.1"));
+        assert!(!version_newer("1.4.1", "1.4.1"));
+        assert!(!version_newer("1.4.0", "1.4.1"));
     }
 
     /// End-to-end link playback: fetches yt-dlp + ffmpeg if missing, plays a short public

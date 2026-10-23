@@ -74,7 +74,9 @@ pub struct Settings {
     pub category: Option<String>,
 
     /// Preview frame rate while MarkCam is behind another window (30, 15, 5 or 0 = off).
-    pub background_preview_fps: u32,
+    /// A new key: the old `background_preview_fps` defaulted to 15, which people took for a
+    /// bug, so everyone starts again from 30.
+    pub preview_fps_behind: u32,
     /// Close the webcam while MarkCam is minimized and no app uses the virtual camera.
     pub idle_camera: bool,
     /// Where "Download" saves videos (`None` = Videos\MarkCam).
@@ -143,7 +145,7 @@ impl Default for Settings {
             layers: Vec::new(),
             tab: "effects".into(),
             category: None,
-            background_preview_fps: 15,
+            preview_fps_behind: 30,
             idle_camera: true,
             download_dir: None,
             background: "off".into(),
