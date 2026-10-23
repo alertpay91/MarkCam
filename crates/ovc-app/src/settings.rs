@@ -63,6 +63,10 @@ pub struct Settings {
     pub voice_strength: u8,
     /// The last link played.
     pub last_link: String,
+    /// Videos and links played lately, newest first: "file:<path>" / "link:<url>".
+    pub recent_media: Vec<String>,
+    /// Linux: "start when I log in" was turned on once by default (see apply_settings).
+    pub login_start_set: bool,
     /// Link quality (max lines).
     pub link_quality: u32,
 
@@ -140,6 +144,8 @@ impl Default for Settings {
             voice_mode: 0,
             voice_strength: crate::voice::DEFAULT_STRENGTH,
             last_link: String::new(),
+            recent_media: Vec::new(),
+            login_start_set: false,
             link_quality: 360,
             vcam_on: true,
             layers: Vec::new(),

@@ -938,6 +938,8 @@ enum Tab {
     Effects,
     Background,
     Layers,
+    /// Videos, links and the screen: as the picture or over it.
+    Media,
     Adjust,
     Audio,
     Setup,
@@ -951,6 +953,7 @@ impl Tab {
             Tab::Effects => "effects",
             Tab::Background => "background",
             Tab::Layers => "layers",
+            Tab::Media => "media",
             Tab::Adjust => "adjust",
             Tab::Audio => "audio",
             Tab::Setup => "setup",
@@ -958,7 +961,7 @@ impl Tab {
         }
     }
     fn from_id(s: &str) -> Tab {
-        [Tab::Effects, Tab::Background, Tab::Layers, Tab::Adjust, Tab::Audio, Tab::Setup, Tab::Banner].into_iter().find(|t| t.id() == s).unwrap_or(Tab::Effects)
+        [Tab::Effects, Tab::Background, Tab::Layers, Tab::Media, Tab::Adjust, Tab::Audio, Tab::Setup, Tab::Banner].into_iter().find(|t| t.id() == s).unwrap_or(Tab::Effects)
     }
 }
 
@@ -1503,6 +1506,10 @@ struct Studio {
     /// A link waiting for yt-dlp / ffmpeg to finish downloading.
     pending_link: Option<String>,
     last_link: String,
+    /// Videos and links played lately (see `Settings::recent_media`).
+    recent_media: Vec<String>,
+    /// See `Settings::login_start_set`.
+    login_start_set: bool,
     /// Max lines for links (360 / 480 / 720 / 1080).
     link_quality: u32,
     video_dl: Option<link::Download>,
@@ -1614,6 +1621,8 @@ impl Studio {
             link_dialog: None,
             pending_link: None,
             last_link: String::new(),
+            recent_media: Vec::new(),
+            login_start_set: false,
             link_quality: 360,
             video_dl: None,
             last_download: None,
@@ -1746,6 +1755,17 @@ impl Studio {
         self.audio_ctl.voice.store(c.voice_mode.min(voice::BEST), Ordering::Relaxed);
         self.audio_ctl.voice_strength.store(c.voice_strength.clamp(1, 5), Ordering::Relaxed);
         self.last_link = c.last_link.clone();
+        self.recent_media = c.recent_media.clone();
+        // Linux: ClassIn (Chromium) lists the MarkCam camera only if MarkCam already runs when
+        // ClassIn starts (v4l2loopback announces a camera once a picture is sent). Starting at
+        // login, minimized, makes that the normal case. On once; the user can turn it off.
+        self.login_start_set = c.login_start_set;
+        if cfg!(not(windows)) && !self.login_start_set && std::env::var_os("OVC_TEST").is_none() {
+            if autostart::set(true).is_ok() {
+                self.autostart = autostart::enabled();
+            }
+            self.login_start_set = true;
+        }
         self.link_quality = c.link_quality;
         // Never on in a test run, not even for a moment (see `Studio::new`).
         fx.vcam.on = c.vcam_on && std::env::var_os("OVC_TEST").is_none();
@@ -1809,6 +1829,16 @@ impl Studio {
         self.frozen = false;
         if let Spec::Camera { idx, .. } = spec {
             self.last_camera = Some(idx);
+        }
+        let recent = match &spec {
+            Spec::Media(p) => Some(format!("file:{}", p.display())),
+            Spec::Link(u, _) => Some(format!("link:{u}")),
+            _ => None,
+        };
+        if let Some(r) = recent {
+            self.recent_media.retain(|x| *x != r);
+            self.recent_media.insert(0, r);
+            self.recent_media.truncate(8);
         }
         if spec != self.current {
             self.current = spec.clone();
@@ -1927,7 +1957,7 @@ impl Studio {
             self.last_link = url.clone();
             self.link_dialog = None;
             self.video_dl = Some(link::Download::start(&url, self.link_quality));
-            self.tab = Tab::Audio; // where the download's progress is shown
+            self.tab = Tab::Media; // where the download's progress is shown
             return;
         }
         if play {
@@ -2089,6 +2119,8 @@ impl Studio {
             voice_mode: self.audio_ctl.voice.load(Ordering::Relaxed),
             voice_strength: self.audio_ctl.voice_strength.load(Ordering::Relaxed),
             last_link: self.last_link.clone(),
+            recent_media: self.recent_media.clone(),
+            login_start_set: self.login_start_set,
             link_quality: self.link_quality,
             vcam_on: fx.vcam.on,
             layers: fx
@@ -2636,12 +2668,14 @@ impl Studio {
             .width_range(300.0..=600.0)
             .frame(egui::Frame::none().fill(theme::PANEL).inner_margin(egui::Margin::same(12.0)))
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
                     let n = fx.overlays.len();
                     for (tab, label) in [
                         (Tab::Effects, "Effects".to_string()),
                         (Tab::Layers, if n > 0 { format!("Layers ({n})") } else { "Layers".into() }),
                         (Tab::Background, "Background".to_string()),
+                        (Tab::Media, "Media".to_string()),
                         (Tab::Adjust, "Adjust".to_string()),
                         (Tab::Audio, "Audio".to_string()),
                         (Tab::Setup, "Setup".to_string()),
@@ -3409,6 +3443,175 @@ impl Studio {
                         });
                     }
 
+                    Tab::Media => {
+                        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                            let pb = link::playback();
+                            let not_camera = matches!(self.current, Spec::Link(..) | Spec::Media(_) | Spec::Screen(_));
+                            theme::section(ui, "Play as the picture");
+                            theme::card(ui, |ui| {
+                                ui.label(egui::RichText::new("Instead of your camera, the students see:").small().color(theme::TEXT_DIM));
+                                let w = (ui.available_width() - 6.0) / 2.0;
+                                ui.horizontal(|ui| {
+                                    if ui.add_sized([w, 34.0], egui::Button::new("🎞  Video file…")).on_hover_text("A video from this computer, with sound").clicked() {
+                                        source_action = Some(SourceAction::PickVideo);
+                                    }
+                                    if ui
+                                        .add_sized([w, 34.0], egui::Button::new("▶  YouTube / link…"))
+                                        .on_hover_text("YouTube, Twitch, Facebook and many more — live streams too, with sound. Or download it.")
+                                        .clicked()
+                                    {
+                                        source_action = Some(SourceAction::LinkDialog);
+                                    }
+                                });
+                                ui.horizontal(|ui| {
+                                    if ui.add_sized([w, 34.0], egui::Button::new("🖥  Full screen")).clicked() {
+                                        source_action = Some(SourceAction::FullScreen);
+                                    }
+                                    if ui
+                                        .add_sized([w, 34.0], egui::Button::new("▭  Part of the screen…"))
+                                        .on_hover_text("Drag a rectangle anywhere on the screen — e.g. a student's video in ClassIn")
+                                        .clicked()
+                                    {
+                                        source_action = Some(SourceAction::PickArea);
+                                    }
+                                });
+                                if let Some(a) = self.screen_area {
+                                    if ui.small_button(format!("Last area again ({}×{})", a.w, a.h)).clicked() {
+                                        source_action = Some(SourceAction::LastArea);
+                                    }
+                                }
+                                if not_camera {
+                                    ui.add_space(4.0);
+                                    if ui
+                                        .add_sized(
+                                            [ui.available_width(), 32.0],
+                                            egui::Button::new(egui::RichText::new("📷  Back to camera").color(egui::Color32::WHITE)).fill(theme::ACCENT),
+                                        )
+                                        .clicked()
+                                    {
+                                        source_action = Some(SourceAction::BackToCamera);
+                                    }
+                                }
+                            });
+                            // Now playing: the same controls as under the preview, plus its sound.
+                            if pb.active && matches!(self.current, Spec::Link(..) | Spec::Media(_)) {
+                                ui.add_space(6.0);
+                                theme::section(ui, "Now playing");
+                                theme::card(ui, |ui| {
+                                    let name = match &self.current {
+                                        Spec::Link(u, _) => short_link(u),
+                                        Spec::Media(p) => p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                                        _ => String::new(),
+                                    };
+                                    ui.label(egui::RichText::new(name).strong());
+                                    ui.allocate_ui(egui::vec2(ui.available_width(), 30.0), |ui| transport_bar(ui, &pb, &mut self.scrub));
+                                    let ctl = self.audio_ctl.clone();
+                                    let mut media_g = audio::Controls::get(&ctl.media_gain);
+                                    ui.add(egui::Slider::new(&mut media_g, 0.0..=2.0).text("Video sound"));
+                                    audio::Controls::set(&ctl.media_gain, media_g);
+                                });
+                            }
+                            // A link being downloaded (its progress) / the download that finished.
+                            if let Some(d) = &self.video_dl {
+                                let st = d.status.lock().unwrap().clone();
+                                if d.active.load(Ordering::SeqCst) {
+                                    ui.add_space(6.0);
+                                    ui.horizontal(|ui| {
+                                        spinner(ui);
+                                        ui.label(st);
+                                    });
+                                } else {
+                                    let file = d.file.lock().unwrap().clone();
+                                    if file.is_some() {
+                                        self.last_download = file;
+                                    } else {
+                                        self.load_err = Some(st);
+                                    }
+                                    self.video_dl = None;
+                                }
+                            }
+                            ui.add_space(6.0);
+                            theme::section(ui, "Play over the picture");
+                            theme::card(ui, |ui| {
+                                ui.label("A video, GIF or picture on top of your camera — move and resize it on the preview.");
+                                if ui.button("➕  Add a video, GIF or picture…").on_hover_text("It is also kept in Effects → My effects").clicked() {
+                                    add_image = true;
+                                }
+                                ui.label(
+                                    egui::RichText::new("Green-screen video? Select it, then Layers → Remove green background.")
+                                        .small()
+                                        .color(theme::TEXT_DIM),
+                                );
+                            });
+                            ui.add_space(6.0);
+                            theme::section(ui, "Recent");
+                            theme::card(ui, |ui| {
+                                let mut play: Option<Spec> = None;
+                                if self.recent_media.is_empty() {
+                                    ui.label(egui::RichText::new("Videos and links you play show up here.").small().color(theme::TEXT_DIM));
+                                }
+                                for r in &self.recent_media {
+                                    let (icon, label, spec) = if let Some(u) = r.strip_prefix("link:") {
+                                        ("▶", short_link(u), Spec::Link(u.to_string(), self.link_quality))
+                                    } else {
+                                        let p = PathBuf::from(r.strip_prefix("file:").unwrap_or(r));
+                                        let name = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                                        ("🎞", name, Spec::Media(p))
+                                    };
+                                    let missing = matches!(&spec, Spec::Media(p) if !p.is_file());
+                                    let full = r.split_once(':').map(|x| x.1).unwrap_or(r);
+                                    if ui.add_enabled(!missing, egui::Button::new(format!("{icon}  {label}")).frame(false)).on_hover_text(full).clicked() {
+                                        play = Some(spec);
+                                    }
+                                }
+                                let dir = link::downloads_dir();
+                                let mut downloaded: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&dir)
+                                    .map(|it| {
+                                        it.filter_map(|e| e.ok())
+                                            .map(|e| e.path())
+                                            .filter(|p| video::is_video_file(p))
+                                            .filter_map(|p| Some((std::fs::metadata(&p).ok()?.modified().ok()?, p)))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                downloaded.sort_by(|a, b| b.0.cmp(&a.0));
+                                if !downloaded.is_empty() {
+                                    ui.add_space(4.0);
+                                    ui.label(egui::RichText::new("Downloaded").small().strong());
+                                    for (_, p) in downloaded.iter().take(6) {
+                                        let name = p.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                                        if ui.add(egui::Button::new(format!("⬇  {name}")).frame(false)).clicked() {
+                                            play = Some(Spec::Media(p.clone()));
+                                        }
+                                    }
+                                }
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new(format!("Downloads go to {}", dir.display())).small().color(theme::TEXT_DIM));
+                                ui.horizontal(|ui| {
+                                    if ui.small_button("Open folder").clicked() {
+                                        let _ = std::fs::create_dir_all(&dir);
+                                        open_folder(&dir);
+                                    }
+                                    if ui.small_button("Change folder…").clicked() {
+                                        pick_dl_dir = true;
+                                    }
+                                    if self.download_dir.is_some() && ui.small_button("Reset to default").clicked() {
+                                        self.download_dir = None;
+                                        link::set_downloads_dir(None);
+                                    }
+                                });
+                                if let Some(s) = play {
+                                    if let Spec::Media(p) = &s {
+                                        self.media_path = Some(p.clone());
+                                    }
+                                    pending = Some(s);
+                                }
+                            });
+                        });
+                        // Download progress and the playback position move without input.
+                        ctx.request_repaint_after(std::time::Duration::from_millis(250));
+                    }
+
                     Tab::Audio => {
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                             theme::section(ui, "MarkCam Microphone");
@@ -3557,50 +3760,6 @@ impl Studio {
                                     self.audio_key = None;
                                 }
                             });
-                            ui.add_space(6.0);
-                            theme::section(ui, "Play from link");
-                            theme::card(ui, |ui| {
-                                ui.label("YouTube, Twitch, Facebook… live or recorded, with sound.");
-                                if ui.button("▶  Play or download a link…").clicked() {
-                                    self.link_dialog = Some(self.last_link.clone());
-                                }
-                                if let Some(d) = &self.video_dl {
-                                    let st = d.status.lock().unwrap().clone();
-                                    if d.active.load(Ordering::SeqCst) {
-                                        ui.horizontal(|ui| {
-                                            spinner(ui);
-                                            ui.label(st);
-                                        });
-                                    } else {
-                                        let file = d.file.lock().unwrap().clone();
-                                        if file.is_some() {
-                                            self.last_download = file;
-                                        } else {
-                                            self.load_err = Some(st);
-                                        }
-                                        self.video_dl = None;
-                                    }
-                                }
-                                if let Some(f) = self.last_download.clone() {
-                                    ui.label(
-                                        egui::RichText::new(format!(
-                                            "Downloaded: {}",
-                                            f.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
-                                        ))
-                                        .small()
-                                        .color(theme::LIVE),
-                                    );
-                                    ui.horizontal(|ui| {
-                                        if ui.button("▶  Play it").clicked() {
-                                            self.media_path = Some(f.clone());
-                                            pending = Some(Spec::Media(f.clone()));
-                                        }
-                                        if ui.button("Open folder").clicked() {
-                                            open_folder(&link::downloads_dir());
-                                        }
-                                    });
-                                }
-                            });
                         });
                         ctx.request_repaint_after(std::time::Duration::from_millis(60)); // meters
                     }
@@ -3679,31 +3838,18 @@ impl Studio {
                                         Err(e) => self.load_err = Some(format!("{}: {e}", autostart::LABEL)),
                                     }
                                 }
+                                if cfg!(not(windows)) {
+                                    note(
+                                        ui,
+                                        "On Linux, ClassIn only sees the MarkCam camera if MarkCam is already running when \
+                                         ClassIn starts. Keep this on, or start MarkCam first and then ClassIn.",
+                                    );
+                                }
                                 note(
                                     ui,
                                     "MarkCam is then always ready in ClassIn without opening it first, and with the \
                                      webcam resting it costs next to nothing until a lesson starts.",
                                 );
-                            });
-                            ui.add_space(6.0);
-                            theme::section(ui, "Downloads");
-                            theme::card(ui, |ui| {
-                                ui.label("Videos downloaded from links are saved in:");
-                                ui.label(egui::RichText::new(link::downloads_dir().display().to_string()).small().monospace());
-                                ui.horizontal(|ui| {
-                                    if ui.button("Change folder…").clicked() {
-                                        pick_dl_dir = true;
-                                    }
-                                    if ui.button("Open folder").clicked() {
-                                        let dir = link::downloads_dir();
-                                        let _ = std::fs::create_dir_all(&dir);
-                                        open_folder(&dir);
-                                    }
-                                    if self.download_dir.is_some() && ui.small_button("Reset to default").clicked() {
-                                        self.download_dir = None;
-                                        link::set_downloads_dir(None);
-                                    }
-                                });
                             });
                             ui.add_space(6.0);
                             theme::section(ui, "Face tracking");
