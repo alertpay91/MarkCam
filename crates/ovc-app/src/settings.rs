@@ -192,6 +192,9 @@ pub struct SavedLayer {
     pub on: bool,
     #[serde(default)]
     pub remove_green: bool,
+    /// Rotation in radians (freely placed layers).
+    #[serde(default)]
+    pub angle: f32,
 }
 
 /// The app's data folder: `%APPDATA%\MarkCam` (settings, My Effects, face models,

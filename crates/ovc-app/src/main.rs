@@ -289,6 +289,10 @@ struct Overlay {
     pos: [f32; 2],  // top-left, fraction of frame
     size: [f32; 2], // base size, fraction of frame
     scale: f32,     // user multiplier on size
+    /// Rotation in radians around the layer's center (freely placed layers).
+    angle: f32,
+    /// Width / height of the picture it was last drawn on (rotated outlines need it).
+    aspect: f32,
     opacity: f32,
     on: bool,
     // animation playback
@@ -401,6 +405,7 @@ fn overlay_from_saved(s: &settings::SavedLayer) -> Option<Overlay> {
     ov.pos = s.pos;
     ov.size = s.size;
     ov.scale = s.scale;
+    ov.angle = s.angle;
     ov.opacity = s.opacity;
     ov.on = s.on;
     Some(ov)
@@ -436,6 +441,8 @@ impl Overlay {
             pos,
             size,
             scale: 1.0,
+            angle: 0.0,
+            aspect: 16.0 / 9.0,
             opacity: 1.0,
             on: true,
             cur: 0,
@@ -464,10 +471,28 @@ impl Overlay {
     /// Normalized rect for hit-testing / the selection outline.
     fn hit_rect(&self) -> Option<[f32; 4]> {
         if self.follows_face() {
-            self.drawn
-        } else {
-            Some([self.pos[0], self.pos[1], self.pos[0] + self.size[0] * self.scale, self.pos[1] + self.size[1] * self.scale])
+            return self.drawn;
         }
+        let c = self.corners();
+        let (xs, ys) = (c.map(|p| p[0]), c.map(|p| p[1]));
+        let min = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
+        let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
+        Some([min(xs), min(ys), max(xs), max(ys)])
+    }
+
+    /// Center of a freely placed layer, normalized.
+    fn center(&self) -> [f32; 2] {
+        [self.pos[0] + self.size[0] * self.scale / 2.0, self.pos[1] + self.size[1] * self.scale / 2.0]
+    }
+
+    /// The (rotated) corners of a freely placed layer, normalized: top-left, top-right,
+    /// bottom-right, bottom-left.
+    fn corners(&self) -> [[f32; 2]; 4] {
+        let [cx, cy] = self.center();
+        // Rotate in square units (x scaled by the picture's aspect), then back.
+        let (hw, hh) = (self.size[0] * self.scale / 2.0 * self.aspect, self.size[1] * self.scale / 2.0);
+        let (sn, cs) = self.angle.sin_cos();
+        [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)].map(|(x, y)| [cx + (x * cs - y * sn) / self.aspect, cy + x * sn + y * cs])
     }
 
     /// Step the GIF animation by wall-clock time.
@@ -576,7 +601,15 @@ impl Overlay {
         if !self.ensure_cache(tw, th) {
             return;
         }
-        // Rotated blit: bounding box of the rotated rect, inverse-rotate each pixel.
+        self.drawn = Some(self.blit_rotated(rgba, w, h, (cx, cy), (tw, th), angle));
+    }
+
+    /// Alpha-blend the cached frame (`tw`x`th`) centered at `c` (pixels), rotated by `angle`.
+    /// Returns the normalized bounding box it covered.
+    fn blit_rotated(&self, rgba: &mut [u8], w: u32, h: u32, c: (f32, f32), (tw, th): (u32, u32), angle: f32) -> [f32; 4] {
+        let (cx, cy) = c;
+        let (sn, cs) = angle.sin_cos();
+        // Bounding box of the rotated rect, inverse-rotate each pixel.
         let (hw, hh) = (tw as f32 / 2.0, th as f32 / 2.0);
         let ex = hw * cs.abs() + hh * sn.abs();
         let ey = hw * sn.abs() + hh * cs.abs();
@@ -604,7 +637,7 @@ impl Overlay {
                 }
             }
         }
-        self.drawn = Some([x0 as f32 / w as f32, y0 as f32 / h as f32, x1 as f32 / w as f32, y1 as f32 / h as f32]);
+        [x0 as f32 / w as f32, y0 as f32 / h as f32, x1 as f32 / w as f32, y1 as f32 / h as f32]
     }
 
     /// Advance animation (if any) and alpha-blend the current frame onto `rgba`
@@ -620,6 +653,12 @@ impl Overlay {
         let x0 = (self.pos[0] * w as f32).round() as i32;
         let y0 = (self.pos[1] * h as f32).round() as i32;
         if !self.ensure_cache(tw, th) {
+            return;
+        }
+        self.aspect = w as f32 / h as f32;
+        if self.angle.abs() > 1e-3 {
+            let [cx, cy] = self.center();
+            self.blit_rotated(rgba, w, h, (cx * w as f32, cy * h as f32), (tw, th), self.angle);
             return;
         }
         let op = self.opacity.clamp(0.0, 1.0);
@@ -654,6 +693,8 @@ impl Overlay {
 enum DragMode {
     Move,
     Resize,
+    /// Turning the layer with the handle above it.
+    Rotate,
     /// Moving the center of a bulge/pinch/swirl distortion.
     WarpCenter,
 }
@@ -1852,6 +1893,13 @@ impl Studio {
     /// after start, saves it and exits (`OVC_QUERY` pre-fills the effect search).
     fn test_screenshot(&mut self, ctx: &egui::Context, fx: &Fx) {
         let Some(path) = std::env::var_os("OVC_SCREENSHOT") else { return };
+        // OVC_SELECT=<layer index> selects that effect once the layers are loaded (its
+        // outline and handles show).
+        if let Some(i) = std::env::var("OVC_SELECT").ok().and_then(|s| s.parse::<usize>().ok()) {
+            if self.selected.is_none() && i < fx.overlays.len() {
+                self.selected = Some(i);
+            }
+        }
         if fx.processed < 3 {
             if let Ok(q) = std::env::var("OVC_QUERY") {
                 self.query = q;
@@ -2137,6 +2185,7 @@ impl Studio {
                         opacity: o.opacity,
                         on: o.on,
                         remove_green: o.remove_green,
+                        angle: o.angle,
                     })
                 })
                 .collect(),
@@ -2915,114 +2964,117 @@ impl Studio {
                                             self.tab = Tab::Banner;
                                         }
                                     });
-                                    theme::section(ui, "MarkCam effects");
-                                    ui.scope(|ui| {
-                                        ui.spacing_mut().item_spacing.y = 0.0;
-                                        if theme::list_row(ui, "Weather (Rain, Snow, Storm, Sun…)", AnimKind::ALL.iter().filter(|k| k.is_weather()).count()).clicked() {
-                                            self.tab = Tab::Adjust;
-                                        }
-                                        if theme::list_row(ui, "Animated (Fire, Matrix, Stars…)", AnimKind::ALL.iter().filter(|k| !k.is_weather()).count()).clicked() {
-                                            self.tab = Tab::Adjust;
-                                        }
-                                        if theme::list_row(ui, "Distortions", WarpKind::ALL.len() - 1).clicked() {
-                                            self.tab = Tab::Adjust;
-                                        }
-                                        if theme::list_row(ui, "Color filters", Filter::ALL.len() - 1).clicked() {
-                                            self.tab = Tab::Adjust;
-                                        }
-                                        let mine = cats.iter().find(|(n, _)| n == library::MY_EFFECTS).map_or(0, |c| c.1);
-                                        if theme::list_row(ui, library::MY_EFFECTS, mine)
-                                            .on_hover_text("Your own images and GIF animations. Add with + or drag files onto the window.")
-                                            .clicked()
-                                        {
-                                            self.category = Some(library::MY_EFFECTS.into());
-                                        }
-                                        // MarkCam's own packs (hats, hair, glasses, stickers…).
-                                        for name in &own_cats {
-                                            let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
-                                            if count > 0 && theme::list_row(ui, name, count).clicked() {
-                                                self.category = Some(name.clone());
+                                    // The whole home page scrolls (a short window hid the last categories).
+                                    egui::ScrollArea::vertical().id_salt("effects-home").auto_shrink([false, false]).show(ui, |ui| {
+                                        theme::section(ui, "MarkCam effects");
+                                        ui.scope(|ui| {
+                                            ui.spacing_mut().item_spacing.y = 0.0;
+                                            if theme::list_row(ui, "Weather (Rain, Snow, Storm, Sun…)", AnimKind::ALL.iter().filter(|k| k.is_weather()).count()).clicked() {
+                                                self.tab = Tab::Adjust;
                                             }
-                                        }
-                                    });
-                                    ui.add_space(6.0);
-                                    // Your own categories (right-click to rename / delete).
-                                    ui.horizontal(|ui| {
-                                        theme::section(ui, "My categories");
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui.small_button("+ New category").clicked() {
-                                                cat_action = Some(CatAction::New(None));
+                                            if theme::list_row(ui, "Animated (Fire, Matrix, Stars…)", AnimKind::ALL.iter().filter(|k| !k.is_weather()).count()).clicked() {
+                                                self.tab = Tab::Adjust;
                                             }
-                                        });
-                                    });
-                                    let user_cats: Vec<String> = self.lib.user_categories().to_vec();
-                                    ui.scope(|ui| {
-                                        ui.spacing_mut().item_spacing.y = 0.0;
-                                        for name in &user_cats {
-                                            let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
-                                            let resp = theme::list_row(ui, name, count);
-                                            if resp.clicked() {
-                                                self.category = Some(name.clone());
+                                            if theme::list_row(ui, "Distortions", WarpKind::ALL.len() - 1).clicked() {
+                                                self.tab = Tab::Adjust;
                                             }
-                                            resp.context_menu(|ui| {
-                                                if ui.button("Rename…").clicked() {
-                                                    cat_action = Some(CatAction::Rename(name.clone()));
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button("Delete (effects go back)").clicked() {
-                                                    cat_action = Some(CatAction::Delete(name.clone()));
-                                                    ui.close_menu();
-                                                }
-                                            });
-                                        }
-                                        if user_cats.is_empty() {
-                                            ui.label(
-                                                egui::RichText::new("Make your own categories, then right-click effects to move them in.")
-                                                    .small()
-                                                    .color(theme::TEXT_DIM),
-                                            );
-                                        }
-                                    });
-                                    ui.add_space(6.0);
-                                    // Everything else: ManyCam's (when turned on in Setup) and imports.
-                                    let others: Vec<&(String, usize)> = cats
-                                        .iter()
-                                        .filter(|(n, c)| n != library::MY_EFFECTS && !user_cats.contains(n) && !own_cats.contains(n) && *c > 0)
-                                        .collect();
-                                    if !others.is_empty() || library::use_manycam() {
-                                        let n: usize = others.iter().map(|c| c.1).sum();
-                                        let title = if library::use_manycam() { "ManyCam categories" } else { "Imported" };
-                                        theme::section(ui, &format!("{title} · {n} effects"));
-                                    }
-                                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                                        ui.spacing_mut().item_spacing.y = 0.0;
-                                        for (name, count) in others.iter().map(|c| (&c.0, &c.1)) {
-                                            let resp = theme::list_row(ui, name, *count).on_hover_text("Right-click to rename or delete");
-                                            if resp.clicked() {
-                                                self.category = Some(name.clone());
+                                            if theme::list_row(ui, "Color filters", Filter::ALL.len() - 1).clicked() {
+                                                self.tab = Tab::Adjust;
                                             }
-                                            resp.context_menu(|ui| {
-                                                if ui.button("Rename…").clicked() {
-                                                    cat_action = Some(CatAction::Rename(name.clone()));
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button(egui::RichText::new("🗑  Delete category").color(theme::ERROR)).clicked() {
-                                                    cat_action = Some(CatAction::Delete(name.clone()));
-                                                    ui.close_menu();
-                                                }
-                                            });
-                                        }
-                                        let deleted = self.lib.deleted_count();
-                                        if deleted > 0 {
-                                            ui.add_space(8.0);
-                                            if ui
-                                                .small_button(format!("↺ Restore deleted effects ({deleted})"))
-                                                .on_hover_text("Bring back ManyCam effects / categories you deleted, and their original names")
+                                            let mine = cats.iter().find(|(n, _)| n == library::MY_EFFECTS).map_or(0, |c| c.1);
+                                            if theme::list_row(ui, library::MY_EFFECTS, mine)
+                                                .on_hover_text("Your own images and GIF animations. Add with + or drag files onto the window.")
                                                 .clicked()
                                             {
-                                                cat_action = Some(CatAction::Restore);
+                                                self.category = Some(library::MY_EFFECTS.into());
                                             }
+                                            // MarkCam's own packs (hats, hair, glasses, stickers…).
+                                            for name in &own_cats {
+                                                let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
+                                                if count > 0 && theme::list_row(ui, name, count).clicked() {
+                                                    self.category = Some(name.clone());
+                                                }
+                                            }
+                                        });
+                                        ui.add_space(6.0);
+                                        // Your own categories (right-click to rename / delete).
+                                        ui.horizontal(|ui| {
+                                            theme::section(ui, "My categories");
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if ui.small_button("+ New category").clicked() {
+                                                    cat_action = Some(CatAction::New(None));
+                                                }
+                                            });
+                                        });
+                                        let user_cats: Vec<String> = self.lib.user_categories().to_vec();
+                                        ui.scope(|ui| {
+                                            ui.spacing_mut().item_spacing.y = 0.0;
+                                            for name in &user_cats {
+                                                let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
+                                                let resp = theme::list_row(ui, name, count);
+                                                if resp.clicked() {
+                                                    self.category = Some(name.clone());
+                                                }
+                                                resp.context_menu(|ui| {
+                                                    if ui.button("Rename…").clicked() {
+                                                        cat_action = Some(CatAction::Rename(name.clone()));
+                                                        ui.close_menu();
+                                                    }
+                                                    if ui.button("Delete (effects go back)").clicked() {
+                                                        cat_action = Some(CatAction::Delete(name.clone()));
+                                                        ui.close_menu();
+                                                    }
+                                                });
+                                            }
+                                            if user_cats.is_empty() {
+                                                ui.label(
+                                                    egui::RichText::new("Make your own categories, then right-click effects to move them in.")
+                                                        .small()
+                                                        .color(theme::TEXT_DIM),
+                                                );
+                                            }
+                                        });
+                                        ui.add_space(6.0);
+                                        // Everything else: ManyCam's (when turned on in Setup) and imports.
+                                        let others: Vec<&(String, usize)> = cats
+                                            .iter()
+                                            .filter(|(n, c)| n != library::MY_EFFECTS && !user_cats.contains(n) && !own_cats.contains(n) && *c > 0)
+                                            .collect();
+                                        if !others.is_empty() || library::use_manycam() {
+                                            let n: usize = others.iter().map(|c| c.1).sum();
+                                            let title = if library::use_manycam() { "ManyCam categories" } else { "Imported" };
+                                            theme::section(ui, &format!("{title} · {n} effects"));
                                         }
+                                        ui.scope(|ui| {
+                                            ui.spacing_mut().item_spacing.y = 0.0;
+                                            for (name, count) in others.iter().map(|c| (&c.0, &c.1)) {
+                                                let resp = theme::list_row(ui, name, *count).on_hover_text("Right-click to rename or delete");
+                                                if resp.clicked() {
+                                                    self.category = Some(name.clone());
+                                                }
+                                                resp.context_menu(|ui| {
+                                                    if ui.button("Rename…").clicked() {
+                                                        cat_action = Some(CatAction::Rename(name.clone()));
+                                                        ui.close_menu();
+                                                    }
+                                                    if ui.button(egui::RichText::new("🗑  Delete category").color(theme::ERROR)).clicked() {
+                                                        cat_action = Some(CatAction::Delete(name.clone()));
+                                                        ui.close_menu();
+                                                    }
+                                                });
+                                            }
+                                            let deleted = self.lib.deleted_count();
+                                            if deleted > 0 {
+                                                ui.add_space(8.0);
+                                                if ui
+                                                    .small_button(format!("↺ Restore deleted effects ({deleted})"))
+                                                    .on_hover_text("Bring back ManyCam effects / categories you deleted, and their original names")
+                                                    .clicked()
+                                                {
+                                                    cat_action = Some(CatAction::Restore);
+                                                }
+                                            }
+                                        });
                                     });
                                 }
                             }
@@ -3267,6 +3319,12 @@ impl Studio {
                                         });
                                         if is_sel {
                                             ui.add(egui::Slider::new(&mut ov.scale, 0.05..=4.0).text("size"));
+                                            if !ov.follows_face() {
+                                                let mut deg = ov.angle.to_degrees();
+                                                if ui.add(egui::Slider::new(&mut deg, -180.0..=180.0).suffix("°").text("rotation")).on_hover_text("Or drag the ↻ knob above it on the preview (double-click it: straight)").changed() {
+                                                    ov.angle = deg.to_radians();
+                                                }
+                                            }
                                             ui.add(egui::Slider::new(&mut ov.opacity, 0.0..=1.0).text("opacity"));
                                             if ui
                                                 .checkbox(&mut ov.remove_green, "Remove green background")
@@ -4056,10 +4114,42 @@ impl Studio {
             }
 
             // The selected effect's remove button (top-right corner of its outline, on screen).
-            let remove_btn = self.selected.and_then(|i| fx.overlays.get(i)).and_then(|ov| ov.hit_rect()).map(|r| {
-                let outline = egui::Rect::from_two_pos(n2s(r[0], r[1]), n2s(r[2], r[3]));
-                outline.right_top()
-            });
+            // The selected effect's outline and handles on screen: × (top right), resize (bottom
+            // right) and, for freely placed layers, the rotate knob above the top edge. Face
+            // effects follow the face: outline and × only.
+            struct Handles {
+                outline: [egui::Pos2; 4],
+                close: egui::Pos2,
+                resize: Option<egui::Pos2>,
+                /// (middle of the top edge, the knob).
+                rotate: Option<(egui::Pos2, egui::Pos2)>,
+                center: egui::Pos2,
+            }
+            let handles = |ov: &Overlay| -> Option<Handles> {
+                if ov.follows_face() {
+                    let r = ov.hit_rect()?;
+                    let b = egui::Rect::from_two_pos(n2s(r[0], r[1]), n2s(r[2], r[3]));
+                    return Some(Handles { outline: [b.left_top(), b.right_top(), b.right_bottom(), b.left_bottom()], close: b.right_top(), resize: None, rotate: None, center: b.center() });
+                }
+                let pts = ov.corners().map(|q| n2s(q[0], q[1]));
+                // By where they are on screen (the preview may be mirrored).
+                let pick = |f: fn(egui::Pos2) -> f32| pts.into_iter().max_by(|a, b| f(*a).total_cmp(&f(*b))).unwrap_or(pts[0]);
+                let c = ov.center();
+                let center = n2s(c[0], c[1]);
+                let mid = pts[0] + (pts[1] - pts[0]) * 0.5;
+                let knob = mid + (mid - center).normalized() * 26.0;
+                Some(Handles { outline: pts, close: pick(|q| q.x - q.y), resize: Some(pick(|q| q.x + q.y)), rotate: Some((mid, knob)), center })
+            };
+            let sel_handles = self.selected.and_then(|i| fx.overlays.get(i)).and_then(|ov| handles(ov));
+            let remove_btn = sel_handles.as_ref().map(|h| h.close);
+            // Double-click the rotate knob: back to straight.
+            if response.double_clicked() {
+                if let (Some(p), Some((_, knob)), Some(ov)) = (response.interact_pointer_pos(), sel_handles.as_ref().and_then(|h| h.rotate), self.selected.and_then(|i| fx.overlays.get_mut(i))) {
+                    if p.distance(knob) <= 12.0 {
+                        ov.angle = 0.0;
+                    }
+                }
+            }
             let on_remove_btn = |p: egui::Pos2| remove_btn.is_some_and(|c| c.distance(p) <= 12.0);
             let mut removed_now = false;
             if (response.clicked() || response.drag_started()) && !maker_drag {
@@ -4080,12 +4170,12 @@ impl Studio {
                     self.drag_mode = None;
                     // Face-following layers are placed by the face: no move / corner resize
                     // (scroll still scales them).
-                    if let Some(ov) = self.selected.and_then(|i| fx.overlays.get(i)).filter(|o| !o.follows_face()) {
-                        let hx = ov.pos[0] + ov.size[0] * ov.scale;
-                        let hy = ov.pos[1] + ov.size[1] * ov.scale;
-                        let ru = 14.0 / img_size.x;
-                        let rv = 14.0 / img_size.y;
-                        if (u - hx).abs() <= ru && (v - hy).abs() <= rv {
+                    if let (Some(ov), Some(h)) = (self.selected.and_then(|i| fx.overlays.get(i)).filter(|o| !o.follows_face()), sel_handles.as_ref()) {
+                        if h.rotate.is_some_and(|(_, knob)| p.distance(knob) <= 12.0) {
+                            self.drag_mode = Some(DragMode::Rotate);
+                        } else if h.resize.is_some_and(|r| p.distance(r) <= 14.0) {
+                            // Resize by the pointer's distance from the center (works rotated).
+                            self.grab = (p.distance(h.center).max(1.0), ov.scale);
                             self.drag_mode = Some(DragMode::Resize);
                         }
                     }
@@ -4114,11 +4204,27 @@ impl Studio {
                         fx.warp.cx = u.clamp(0.0, 1.0);
                         fx.warp.cy = v.clamp(0.0, 1.0);
                     } else if let Some(ov) = self.selected.and_then(|i| fx.overlays.get_mut(i)) {
+                        let c = ov.center();
                         match mode {
                             DragMode::Move => ov.pos = [u - self.grab.0, v - self.grab.1],
                             DragMode::Resize => {
-                                let want = (u - ov.pos[0]).max(0.01);
-                                ov.scale = (want / ov.size[0].max(1e-4)).clamp(0.05, 6.0);
+                                let d = p.distance(n2s(c[0], c[1]));
+                                let want = (self.grab.1 * d / self.grab.0).clamp(0.05, 6.0);
+                                // Keep the center where it is.
+                                ov.pos = [c[0] - ov.size[0] * want / 2.0, c[1] - ov.size[1] * want / 2.0];
+                                ov.scale = want;
+                            }
+                            DragMode::Rotate => {
+                                // In picture pixels (the preview may be mirrored; s2n undoes it).
+                                let (dx, dy) = ((u - c[0]) * fw, (v - c[1]) * fh);
+                                let mut a = dy.atan2(dx) + std::f32::consts::FRAC_PI_2;
+                                // Snap to straight / sideways / upside down within 5°.
+                                let quarter = std::f32::consts::FRAC_PI_2;
+                                let near = (a / quarter).round() * quarter;
+                                if (a - near).abs() < 5f32.to_radians() {
+                                    a = near;
+                                }
+                                ov.angle = (a + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
                             }
                             DragMode::WarpCenter => {}
                         }
@@ -4157,19 +4263,29 @@ impl Studio {
                 }
             }
 
-            // Selection outline + resize handle.
-            if let Some(ov) = self.selected.and_then(|i| fx.overlays.get(i)) {
-                if let Some(r) = ov.hit_rect() {
-                    let (a, b) = (n2s(r[0], r[1]), n2s(r[2], r[3]));
+            // Selection outline + handles (only in this window, never on the camera picture).
+            let sel_handles = self.selected.and_then(|i| fx.overlays.get(i)).and_then(|ov| handles(ov));
+            if let Some(h) = sel_handles {
+                {
                     let painter = ui.painter_at(rect);
-                    painter.rect_stroke(egui::Rect::from_two_pos(a, b), 4.0_f32, egui::Stroke::new(2.0_f32, theme::ACCENT));
-                    // Corner handle only for freely placed layers (face ones follow the face).
-                    if !ov.follows_face() {
+                    let hover = ui.input(|i| i.pointer.hover_pos());
+                    painter.add(egui::Shape::closed_line(h.outline.to_vec(), egui::Stroke::new(2.0_f32, theme::ACCENT)));
+                    if let Some(b) = h.resize {
                         painter.circle_filled(b, 7.0, theme::ACCENT);
                         painter.circle_stroke(b, 7.0, egui::Stroke::new(1.5_f32, egui::Color32::WHITE));
                     }
+                    if let Some((mid, knob)) = h.rotate {
+                        let hot = hover.is_some_and(|p| p.distance(knob) <= 12.0) || self.drag_mode == Some(DragMode::Rotate);
+                        if hot {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                        }
+                        painter.line_segment([mid, knob], egui::Stroke::new(1.5_f32, theme::ACCENT));
+                        painter.circle_filled(knob, 9.0, if hot { theme::ACCENT } else { egui::Color32::from_rgb(40, 44, 52) });
+                        painter.circle_stroke(knob, 9.0, egui::Stroke::new(1.5_f32, theme::ACCENT));
+                        painter.text(knob, egui::Align2::CENTER_CENTER, "↻", egui::FontId::proportional(13.0), egui::Color32::WHITE);
+                    }
                     // Remove button, top right (Delete does the same).
-                    let c = egui::Rect::from_two_pos(a, b).right_top();
+                    let c = h.close;
                     let hot = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| p.distance(c) <= 12.0);
                     painter.circle_filled(c, 10.0, if hot { egui::Color32::from_rgb(230, 70, 70) } else { egui::Color32::from_rgb(190, 50, 50) });
                     painter.circle_stroke(c, 10.0, egui::Stroke::new(1.5_f32, egui::Color32::WHITE));
