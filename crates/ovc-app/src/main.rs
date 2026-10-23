@@ -1729,7 +1729,9 @@ impl Studio {
         fx.cg.params = ovc_effects::builtin::ColorGradeParams { brightness, contrast, saturation, temperature };
         fx.blur_on = c.blur_on;
         fx.blur.params.radius = c.blur_radius;
-        fx.ck_on = c.ck_on;
+        // The old "Green screen (chroma key to black)" in Adjust is gone (Background → Color
+        // key does it with a picture): never left on where nobody can turn it off.
+        fx.ck_on = false;
         fx.ck.params.key_rgb = c.ck_rgb;
         fx.ck.params.similarity = c.ck_similarity;
         fx.ck.params.smoothness = c.ck_smoothness;
@@ -3400,6 +3402,11 @@ impl Studio {
                                 if vig {
                                     ui.add(egui::Slider::new(&mut fx.vignette_amount, 0.05..=1.0).text("Amount"));
                                 }
+                                ui.checkbox(&mut fx.blur_on, "Blur the whole picture")
+                                    .on_hover_text("You and the room, e.g. for privacy while you step away. Background → Blur blurs only the room.");
+                                if fx.blur_on {
+                                    ui.add(egui::Slider::new(&mut fx.blur.params.radius, 0.0..=16.0).text("Strength"));
+                                }
                             });
                             ui.add_space(6.0);
                             theme::section(ui, "Color");
@@ -3418,27 +3425,6 @@ impl Studio {
                                     ui.add(egui::Slider::new(&mut fx.cg.params.saturation, 0.0..=2.0).text("Saturation"));
                                     ui.add(egui::Slider::new(&mut fx.cg.params.temperature, -1.0..=1.0).text("Warmth"));
                                 });
-                            });
-                            ui.add_space(6.0);
-                            theme::section(ui, "Background");
-                            theme::card(ui, |ui| {
-                                ui.checkbox(&mut fx.blur_on, "Blur (whole picture)");
-                                if fx.blur_on {
-                                    ui.add(egui::Slider::new(&mut fx.blur.params.radius, 0.0..=16.0).text("Strength"));
-                                }
-                                ui.label(egui::RichText::new("Uses the GPU while on.").small().color(theme::TEXT_DIM));
-                            });
-                            ui.add_space(6.0);
-                            theme::card(ui, |ui| {
-                                ui.checkbox(&mut fx.ck_on, "Green screen (chroma key to black)");
-                                if fx.ck_on {
-                                    ui.horizontal(|ui| {
-                                        ui.label("Key color");
-                                        ui.color_edit_button_rgb(&mut fx.ck.params.key_rgb);
-                                    });
-                                    ui.add(egui::Slider::new(&mut fx.ck.params.similarity, 0.0..=1.0).text("Similarity"));
-                                    ui.add(egui::Slider::new(&mut fx.ck.params.smoothness, 0.0..=0.5).text("Smoothness"));
-                                }
                             });
                         });
                     }
