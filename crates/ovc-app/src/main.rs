@@ -2751,278 +2751,282 @@ impl Studio {
                                 self.tab = Tab::Layers;
                             }
                         }
-                        // Buttons first (right-aligned), the search box takes what is left —
-                        // inside a one-row strip so the layout doesn't claim the whole panel.
-                        let row = egui::vec2(ui.available_width(), 30.0);
-                        ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Import").on_hover_text(if PUBLIC { "Import a shared MarkCam effect (.markcam)" } else { "Import a MarkCam .markcam or a ManyCam .mcv / .mcep file" }).clicked() {
-                                do_import = true;
-                            }
-                            if ui.button("+").on_hover_text("Add your own images or animations (PNG, JPG, GIF, WebP, APNG) — or drag files onto the window").clicked() {
-                                add_image = true;
-                            }
-                            let resp = ui.add(
-                                egui::TextEdit::singleline(&mut self.query)
-                                    .hint_text("🔍  Search all effects…")
-                                    .desired_width(ui.available_width()),
-                            );
-                            if resp.changed() && !self.query.is_empty() {
-                                self.category = None;
-                            }
-                            // Esc: clear the search (like "× Clear"); without one, back from a
-                            // category to all effects. The search box drops focus on Esc itself.
-                            let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                            if esc && (resp.has_focus() || resp.lost_focus()) {
-                                if !self.query.is_empty() {
-                                    self.query.clear();
-                                } else {
+                        // The rest takes the space above that strip (it scrolls there instead of
+                        // running under it).
+                        egui::CentralPanel::default().frame(egui::Frame::none()).show_inside(ui, |ui| {
+                            // Buttons first (right-aligned), the search box takes what is left —
+                            // inside a one-row strip so the layout doesn't claim the whole panel.
+                            let row = egui::vec2(ui.available_width(), 30.0);
+                            ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button("Import").on_hover_text(if PUBLIC { "Import a shared MarkCam effect (.markcam)" } else { "Import a MarkCam .markcam or a ManyCam .mcv / .mcep file" }).clicked() {
+                                    do_import = true;
+                                }
+                                if ui.button("+").on_hover_text("Add your own images or animations (PNG, JPG, GIF, WebP, APNG) — or drag files onto the window").clicked() {
+                                    add_image = true;
+                                }
+                                let resp = ui.add(
+                                    egui::TextEdit::singleline(&mut self.query)
+                                        .hint_text("🔍  Search all effects…")
+                                        .desired_width(ui.available_width()),
+                                );
+                                if resp.changed() && !self.query.is_empty() {
                                     self.category = None;
                                 }
-                            }
-                        });
-                        ui.add_space(4.0);
-
-                        let query = self.query.trim().to_string();
-                        let shown: Option<(String, Vec<library::Item>)> = if !query.is_empty() {
-                            let r = self.lib.search(&query);
-                            Some((format!("{} results for “{query}”", r.len()), r))
-                        } else {
-                            self.category.clone().map(|c| (c.clone(), self.lib.in_category(&c)))
-                        };
-
-                        match shown {
-                            Some((title, items)) => {
-                                ui.horizontal(|ui| {
-                                    if self.category.is_some() && query.is_empty() && ui.small_button("‹ All").clicked() {
+                                // Esc: clear the search (like "× Clear"); without one, back from a
+                                // category to all effects. The search box drops focus on Esc itself.
+                                let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                                if esc && (resp.has_focus() || resp.lost_focus()) {
+                                    if !self.query.is_empty() {
+                                        self.query.clear();
+                                    } else {
                                         self.category = None;
                                     }
-                                    if !query.is_empty() && ui.small_button("× Clear").clicked() {
-                                        self.query.clear();
-                                    }
-                                    ui.label(egui::RichText::new(&title).strong());
-                                    // Any category (except My effects) can be renamed / deleted here.
-                                    if let Some(c) = self.category.clone().filter(|c| query.is_empty() && c != library::MY_EFFECTS) {
-                                        let hint = if self.lib.is_user_category(&c) {
-                                            "Delete this category — its effects go back to their own categories"
-                                        } else {
-                                            "Remove this category and its effects from MarkCam (restorable)"
-                                        };
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if ui.small_button("Delete").on_hover_text(hint).clicked() {
-                                                cat_action = Some(CatAction::Delete(c.clone()));
-                                            }
-                                            if ui.small_button("Rename").clicked() {
-                                                cat_action = Some(CatAction::Rename(c.clone()));
-                                            }
-                                        });
-                                    }
-                                });
-                                if !items.is_empty() {
-                                    ui.label(
-                                        egui::RichText::new("Right-click an effect to move or delete it.")
-                                            .small()
-                                            .color(theme::TEXT_DIM),
-                                    );
                                 }
-                                // Where effects can be moved: your categories first, then the rest.
-                                let mut move_targets: Vec<String> = self.lib.user_categories().to_vec();
-                                let others: Vec<String> = self.lib.categories().iter().map(|(c, _)| c.clone()).collect();
-                                move_targets.extend(others.into_iter().filter(|c| !self.lib.is_user_category(c)));
-                                ui.add_space(4.0);
-                                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                                    let gap = 8.0;
-                                    let avail = ui.available_width();
-                                    let cols = ((avail + gap) / (104.0 + gap)).floor().max(2.0) as usize;
-                                    let tile = (avail - gap * (cols as f32 - 1.0)) / cols as f32;
-                                    ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
-                                    for row in items.chunks(cols) {
-                                        ui.horizontal(|ui| {
-                                            for it in row {
-                                                let ok = match it.kind() {
-                                                    ovc_mcam::Kind::Object | ovc_mcam::Kind::Animation => true,
-                                                    ovc_mcam::Kind::FaceMask => have_face_models,
-                                                    ovc_mcam::Kind::Other | ovc_mcam::Kind::Locked => false,
-                                                };
-                                                let moved = self.lib.is_moved(it);
-                                                let here = self.lib.category_of(it).to_string();
-                                                let resp = effect_tile(ui, &mut self.thumbs, it, tile, ok);
-                                                if resp.clicked() {
-                                                    if ok {
-                                                        add_items.push(it.clone());
-                                                    } else if it.kind() == ovc_mcam::Kind::FaceMask {
-                                                        self.load_err = Some("face masks need the face models — see Setup".into());
-                                                    }
-                                                }
-                                                resp.context_menu(|ui| {
-                                                    ui.label(egui::RichText::new(it.name()).strong());
-                                                    ui.menu_button("Move to category", |ui| {
-                                                        egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                                                            for c in move_targets.iter().filter(|c| **c != here) {
-                                                                if ui.button(c).clicked() {
-                                                                    cat_action = Some(CatAction::Move(it.clone(), Some(c.clone())));
-                                                                    ui.close_menu();
-                                                                }
-                                                            }
-                                                        });
-                                                    });
-                                                    if ui.button("New category with this effect…").clicked() {
-                                                        cat_action = Some(CatAction::New(Some(it.clone())));
-                                                        ui.close_menu();
-                                                    }
-                                                    if moved && ui.button(format!("Back to “{}”", it.category)).clicked() {
-                                                        cat_action = Some(CatAction::Move(it.clone(), None));
-                                                        ui.close_menu();
-                                                    }
-                                                    ui.separator();
-                                                    let own = it.category == library::MY_EFFECTS;
-                                                    let del = ui.button(egui::RichText::new("🗑  Delete effect").color(theme::ERROR)).on_hover_text(if own {
-                                                        "Your file goes to the Recycle Bin"
-                                                    } else {
-                                                        "Removed from MarkCam (restore any time: “Restore deleted effects” at the bottom of the category list)"
-                                                    });
-                                                    if del.clicked() {
-                                                        cat_action = Some(CatAction::DeleteItem(it.clone()));
-                                                        ui.close_menu();
-                                                    }
-                                                });
-                                            }
-                                        });
-                                    }
-                                    if items.is_empty() {
-                                        ui.label(egui::RichText::new("Nothing found.").color(theme::TEXT_DIM));
-                                    }
-                                });
-                            }
-                            None => {
-                                if self.lib.scanning() {
+                            });
+                            ui.add_space(4.0);
+
+                            let query = self.query.trim().to_string();
+                            let shown: Option<(String, Vec<library::Item>)> = if !query.is_empty() {
+                                let r = self.lib.search(&query);
+                                Some((format!("{} results for “{query}”", r.len()), r))
+                            } else {
+                                self.category.clone().map(|c| (c.clone(), self.lib.in_category(&c)))
+                            };
+
+                            match shown {
+                                Some((title, items)) => {
                                     ui.horizontal(|ui| {
-                                        spinner(ui);
-                                        ui.label(egui::RichText::new("Indexing effects…").color(theme::TEXT_DIM));
-                                    });
-                                }
-                                let cats: Vec<(String, usize)> = self.lib.categories().to_vec();
-                                let own_cats = self.lib.own_categories();
-                                ui.add_space(2.0);
-                                ui.columns(2, |c| {
-                                    let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(14.5)).min_size(egui::vec2(0.0, 38.0)).fill(theme::ACCENT_DIM);
-                                    if c[0].add_sized([c[0].available_width(), 38.0], big("🎨 Make your own effect")).on_hover_text("Effect Maker: build a face effect from emoji, pictures or photos, animate it, save it").clicked() {
-                                        open_maker = true;
-                                    }
-                                    if c[1].add_sized([c[1].available_width(), 38.0], big("🏷 Name banner")).on_hover_text("Your name at the bottom of the picture, animated (key N)").clicked() {
-                                        self.tab = Tab::Banner;
-                                    }
-                                });
-                                theme::section(ui, "MarkCam effects");
-                                ui.scope(|ui| {
-                                    ui.spacing_mut().item_spacing.y = 0.0;
-                                    if theme::list_row(ui, "Weather (Rain, Snow, Storm, Sun…)", AnimKind::ALL.iter().filter(|k| k.is_weather()).count()).clicked() {
-                                        self.tab = Tab::Adjust;
-                                    }
-                                    if theme::list_row(ui, "Animated (Fire, Matrix, Stars…)", AnimKind::ALL.iter().filter(|k| !k.is_weather()).count()).clicked() {
-                                        self.tab = Tab::Adjust;
-                                    }
-                                    if theme::list_row(ui, "Distortions", WarpKind::ALL.len() - 1).clicked() {
-                                        self.tab = Tab::Adjust;
-                                    }
-                                    if theme::list_row(ui, "Color filters", Filter::ALL.len() - 1).clicked() {
-                                        self.tab = Tab::Adjust;
-                                    }
-                                    let mine = cats.iter().find(|(n, _)| n == library::MY_EFFECTS).map_or(0, |c| c.1);
-                                    if theme::list_row(ui, library::MY_EFFECTS, mine)
-                                        .on_hover_text("Your own images and GIF animations. Add with + or drag files onto the window.")
-                                        .clicked()
-                                    {
-                                        self.category = Some(library::MY_EFFECTS.into());
-                                    }
-                                    // MarkCam's own packs (hats, hair, glasses, stickers…).
-                                    for name in &own_cats {
-                                        let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
-                                        if count > 0 && theme::list_row(ui, name, count).clicked() {
-                                            self.category = Some(name.clone());
+                                        if self.category.is_some() && query.is_empty() && ui.small_button("‹ All").clicked() {
+                                            self.category = None;
                                         }
-                                    }
-                                });
-                                ui.add_space(6.0);
-                                // Your own categories (right-click to rename / delete).
-                                ui.horizontal(|ui| {
-                                    theme::section(ui, "My categories");
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.small_button("+ New category").clicked() {
-                                            cat_action = Some(CatAction::New(None));
+                                        if !query.is_empty() && ui.small_button("× Clear").clicked() {
+                                            self.query.clear();
+                                        }
+                                        ui.label(egui::RichText::new(&title).strong());
+                                        // Any category (except My effects) can be renamed / deleted here.
+                                        if let Some(c) = self.category.clone().filter(|c| query.is_empty() && c != library::MY_EFFECTS) {
+                                            let hint = if self.lib.is_user_category(&c) {
+                                                "Delete this category — its effects go back to their own categories"
+                                            } else {
+                                                "Remove this category and its effects from MarkCam (restorable)"
+                                            };
+                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                                if ui.small_button("Delete").on_hover_text(hint).clicked() {
+                                                    cat_action = Some(CatAction::Delete(c.clone()));
+                                                }
+                                                if ui.small_button("Rename").clicked() {
+                                                    cat_action = Some(CatAction::Rename(c.clone()));
+                                                }
+                                            });
                                         }
                                     });
-                                });
-                                let user_cats: Vec<String> = self.lib.user_categories().to_vec();
-                                ui.scope(|ui| {
-                                    ui.spacing_mut().item_spacing.y = 0.0;
-                                    for name in &user_cats {
-                                        let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
-                                        let resp = theme::list_row(ui, name, count);
-                                        if resp.clicked() {
-                                            self.category = Some(name.clone());
-                                        }
-                                        resp.context_menu(|ui| {
-                                            if ui.button("Rename…").clicked() {
-                                                cat_action = Some(CatAction::Rename(name.clone()));
-                                                ui.close_menu();
-                                            }
-                                            if ui.button("Delete (effects go back)").clicked() {
-                                                cat_action = Some(CatAction::Delete(name.clone()));
-                                                ui.close_menu();
-                                            }
-                                        });
-                                    }
-                                    if user_cats.is_empty() {
+                                    if !items.is_empty() {
                                         ui.label(
-                                            egui::RichText::new("Make your own categories, then right-click effects to move them in.")
+                                            egui::RichText::new("Right-click an effect to move or delete it.")
                                                 .small()
                                                 .color(theme::TEXT_DIM),
                                         );
                                     }
-                                });
-                                ui.add_space(6.0);
-                                // Everything else: ManyCam's (when turned on in Setup) and imports.
-                                let others: Vec<&(String, usize)> = cats
-                                    .iter()
-                                    .filter(|(n, c)| n != library::MY_EFFECTS && !user_cats.contains(n) && !own_cats.contains(n) && *c > 0)
-                                    .collect();
-                                if !others.is_empty() || library::use_manycam() {
-                                    let n: usize = others.iter().map(|c| c.1).sum();
-                                    let title = if library::use_manycam() { "ManyCam categories" } else { "Imported" };
-                                    theme::section(ui, &format!("{title} · {n} effects"));
-                                }
-                                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                                    ui.spacing_mut().item_spacing.y = 0.0;
-                                    for (name, count) in others.iter().map(|c| (&c.0, &c.1)) {
-                                        let resp = theme::list_row(ui, name, *count).on_hover_text("Right-click to rename or delete");
-                                        if resp.clicked() {
-                                            self.category = Some(name.clone());
+                                    // Where effects can be moved: your categories first, then the rest.
+                                    let mut move_targets: Vec<String> = self.lib.user_categories().to_vec();
+                                    let others: Vec<String> = self.lib.categories().iter().map(|(c, _)| c.clone()).collect();
+                                    move_targets.extend(others.into_iter().filter(|c| !self.lib.is_user_category(c)));
+                                    ui.add_space(4.0);
+                                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                                        let gap = 8.0;
+                                        let avail = ui.available_width();
+                                        let cols = ((avail + gap) / (104.0 + gap)).floor().max(2.0) as usize;
+                                        let tile = (avail - gap * (cols as f32 - 1.0)) / cols as f32;
+                                        ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+                                        for row in items.chunks(cols) {
+                                            ui.horizontal(|ui| {
+                                                for it in row {
+                                                    let ok = match it.kind() {
+                                                        ovc_mcam::Kind::Object | ovc_mcam::Kind::Animation => true,
+                                                        ovc_mcam::Kind::FaceMask => have_face_models,
+                                                        ovc_mcam::Kind::Other | ovc_mcam::Kind::Locked => false,
+                                                    };
+                                                    let moved = self.lib.is_moved(it);
+                                                    let here = self.lib.category_of(it).to_string();
+                                                    let resp = effect_tile(ui, &mut self.thumbs, it, tile, ok);
+                                                    if resp.clicked() {
+                                                        if ok {
+                                                            add_items.push(it.clone());
+                                                        } else if it.kind() == ovc_mcam::Kind::FaceMask {
+                                                            self.load_err = Some("face masks need the face models — see Setup".into());
+                                                        }
+                                                    }
+                                                    resp.context_menu(|ui| {
+                                                        ui.label(egui::RichText::new(it.name()).strong());
+                                                        ui.menu_button("Move to category", |ui| {
+                                                            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                                                                for c in move_targets.iter().filter(|c| **c != here) {
+                                                                    if ui.button(c).clicked() {
+                                                                        cat_action = Some(CatAction::Move(it.clone(), Some(c.clone())));
+                                                                        ui.close_menu();
+                                                                    }
+                                                                }
+                                                            });
+                                                        });
+                                                        if ui.button("New category with this effect…").clicked() {
+                                                            cat_action = Some(CatAction::New(Some(it.clone())));
+                                                            ui.close_menu();
+                                                        }
+                                                        if moved && ui.button(format!("Back to “{}”", it.category)).clicked() {
+                                                            cat_action = Some(CatAction::Move(it.clone(), None));
+                                                            ui.close_menu();
+                                                        }
+                                                        ui.separator();
+                                                        let own = it.category == library::MY_EFFECTS;
+                                                        let del = ui.button(egui::RichText::new("🗑  Delete effect").color(theme::ERROR)).on_hover_text(if own {
+                                                            "Your file goes to the Recycle Bin"
+                                                        } else {
+                                                            "Removed from MarkCam (restore any time: “Restore deleted effects” at the bottom of the category list)"
+                                                        });
+                                                        if del.clicked() {
+                                                            cat_action = Some(CatAction::DeleteItem(it.clone()));
+                                                            ui.close_menu();
+                                                        }
+                                                    });
+                                                }
+                                            });
                                         }
-                                        resp.context_menu(|ui| {
-                                            if ui.button("Rename…").clicked() {
-                                                cat_action = Some(CatAction::Rename(name.clone()));
-                                                ui.close_menu();
-                                            }
-                                            if ui.button(egui::RichText::new("🗑  Delete category").color(theme::ERROR)).clicked() {
-                                                cat_action = Some(CatAction::Delete(name.clone()));
-                                                ui.close_menu();
-                                            }
+                                        if items.is_empty() {
+                                            ui.label(egui::RichText::new("Nothing found.").color(theme::TEXT_DIM));
+                                        }
+                                    });
+                                }
+                                None => {
+                                    if self.lib.scanning() {
+                                        ui.horizontal(|ui| {
+                                            spinner(ui);
+                                            ui.label(egui::RichText::new("Indexing effects…").color(theme::TEXT_DIM));
                                         });
                                     }
-                                    let deleted = self.lib.deleted_count();
-                                    if deleted > 0 {
-                                        ui.add_space(8.0);
-                                        if ui
-                                            .small_button(format!("↺ Restore deleted effects ({deleted})"))
-                                            .on_hover_text("Bring back ManyCam effects / categories you deleted, and their original names")
+                                    let cats: Vec<(String, usize)> = self.lib.categories().to_vec();
+                                    let own_cats = self.lib.own_categories();
+                                    ui.add_space(2.0);
+                                    ui.columns(2, |c| {
+                                        let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(14.5)).min_size(egui::vec2(0.0, 38.0)).fill(theme::ACCENT_DIM);
+                                        if c[0].add_sized([c[0].available_width(), 38.0], big("🎨 Make your own effect")).on_hover_text("Effect Maker: build a face effect from emoji, pictures or photos, animate it, save it").clicked() {
+                                            open_maker = true;
+                                        }
+                                        if c[1].add_sized([c[1].available_width(), 38.0], big("🏷 Name banner")).on_hover_text("Your name at the bottom of the picture, animated (key N)").clicked() {
+                                            self.tab = Tab::Banner;
+                                        }
+                                    });
+                                    theme::section(ui, "MarkCam effects");
+                                    ui.scope(|ui| {
+                                        ui.spacing_mut().item_spacing.y = 0.0;
+                                        if theme::list_row(ui, "Weather (Rain, Snow, Storm, Sun…)", AnimKind::ALL.iter().filter(|k| k.is_weather()).count()).clicked() {
+                                            self.tab = Tab::Adjust;
+                                        }
+                                        if theme::list_row(ui, "Animated (Fire, Matrix, Stars…)", AnimKind::ALL.iter().filter(|k| !k.is_weather()).count()).clicked() {
+                                            self.tab = Tab::Adjust;
+                                        }
+                                        if theme::list_row(ui, "Distortions", WarpKind::ALL.len() - 1).clicked() {
+                                            self.tab = Tab::Adjust;
+                                        }
+                                        if theme::list_row(ui, "Color filters", Filter::ALL.len() - 1).clicked() {
+                                            self.tab = Tab::Adjust;
+                                        }
+                                        let mine = cats.iter().find(|(n, _)| n == library::MY_EFFECTS).map_or(0, |c| c.1);
+                                        if theme::list_row(ui, library::MY_EFFECTS, mine)
+                                            .on_hover_text("Your own images and GIF animations. Add with + or drag files onto the window.")
                                             .clicked()
                                         {
-                                            cat_action = Some(CatAction::Restore);
+                                            self.category = Some(library::MY_EFFECTS.into());
                                         }
+                                        // MarkCam's own packs (hats, hair, glasses, stickers…).
+                                        for name in &own_cats {
+                                            let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
+                                            if count > 0 && theme::list_row(ui, name, count).clicked() {
+                                                self.category = Some(name.clone());
+                                            }
+                                        }
+                                    });
+                                    ui.add_space(6.0);
+                                    // Your own categories (right-click to rename / delete).
+                                    ui.horizontal(|ui| {
+                                        theme::section(ui, "My categories");
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.small_button("+ New category").clicked() {
+                                                cat_action = Some(CatAction::New(None));
+                                            }
+                                        });
+                                    });
+                                    let user_cats: Vec<String> = self.lib.user_categories().to_vec();
+                                    ui.scope(|ui| {
+                                        ui.spacing_mut().item_spacing.y = 0.0;
+                                        for name in &user_cats {
+                                            let count = cats.iter().find(|(c, _)| c == name).map_or(0, |c| c.1);
+                                            let resp = theme::list_row(ui, name, count);
+                                            if resp.clicked() {
+                                                self.category = Some(name.clone());
+                                            }
+                                            resp.context_menu(|ui| {
+                                                if ui.button("Rename…").clicked() {
+                                                    cat_action = Some(CatAction::Rename(name.clone()));
+                                                    ui.close_menu();
+                                                }
+                                                if ui.button("Delete (effects go back)").clicked() {
+                                                    cat_action = Some(CatAction::Delete(name.clone()));
+                                                    ui.close_menu();
+                                                }
+                                            });
+                                        }
+                                        if user_cats.is_empty() {
+                                            ui.label(
+                                                egui::RichText::new("Make your own categories, then right-click effects to move them in.")
+                                                    .small()
+                                                    .color(theme::TEXT_DIM),
+                                            );
+                                        }
+                                    });
+                                    ui.add_space(6.0);
+                                    // Everything else: ManyCam's (when turned on in Setup) and imports.
+                                    let others: Vec<&(String, usize)> = cats
+                                        .iter()
+                                        .filter(|(n, c)| n != library::MY_EFFECTS && !user_cats.contains(n) && !own_cats.contains(n) && *c > 0)
+                                        .collect();
+                                    if !others.is_empty() || library::use_manycam() {
+                                        let n: usize = others.iter().map(|c| c.1).sum();
+                                        let title = if library::use_manycam() { "ManyCam categories" } else { "Imported" };
+                                        theme::section(ui, &format!("{title} · {n} effects"));
                                     }
-                                });
+                                    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                                        ui.spacing_mut().item_spacing.y = 0.0;
+                                        for (name, count) in others.iter().map(|c| (&c.0, &c.1)) {
+                                            let resp = theme::list_row(ui, name, *count).on_hover_text("Right-click to rename or delete");
+                                            if resp.clicked() {
+                                                self.category = Some(name.clone());
+                                            }
+                                            resp.context_menu(|ui| {
+                                                if ui.button("Rename…").clicked() {
+                                                    cat_action = Some(CatAction::Rename(name.clone()));
+                                                    ui.close_menu();
+                                                }
+                                                if ui.button(egui::RichText::new("🗑  Delete category").color(theme::ERROR)).clicked() {
+                                                    cat_action = Some(CatAction::Delete(name.clone()));
+                                                    ui.close_menu();
+                                                }
+                                            });
+                                        }
+                                        let deleted = self.lib.deleted_count();
+                                        if deleted > 0 {
+                                            ui.add_space(8.0);
+                                            if ui
+                                                .small_button(format!("↺ Restore deleted effects ({deleted})"))
+                                                .on_hover_text("Bring back ManyCam effects / categories you deleted, and their original names")
+                                                .clicked()
+                                            {
+                                                cat_action = Some(CatAction::Restore);
+                                            }
+                                        }
+                                    });
+                                }
                             }
-                        }
+                        });
                     }
 
                     Tab::Background => {
@@ -5107,6 +5111,13 @@ fn main() -> eframe::Result<()> {
         Some((x.trim().parse::<f32>().ok()?, y.trim().parse::<f32>().ok()?))
     }) {
         viewport = viewport.with_position([x, y]);
+    }
+    // Testing aid: OVC_WINDOW_SIZE=w,h (e.g. a short window for layout checks).
+    if let Some((w, h)) = std::env::var("OVC_WINDOW_SIZE").ok().and_then(|s| {
+        let (w, h) = s.split_once(',')?;
+        Some((w.trim().parse::<f32>().ok()?, h.trim().parse::<f32>().ok()?))
+    }) {
+        viewport = viewport.with_inner_size([w, h]);
     }
     let options = eframe::NativeOptions {
         viewport,
