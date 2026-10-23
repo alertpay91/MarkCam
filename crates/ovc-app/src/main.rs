@@ -1950,6 +1950,30 @@ impl Studio {
         }
     }
 
+    /// Esc steps back, one step per press, ending on the Effects home: close About, deselect
+    /// the selected effect, clear the search / leave a category, then any other tab →
+    /// Effects. Dialogs (link, category name) and a focused text field handle Esc themselves.
+    fn escape_ladder(&mut self, ctx: &egui::Context) {
+        if self.link_dialog.is_some() || self.cat_dialog.is_some() || ctx.wants_keyboard_input() {
+            return;
+        }
+        if !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            return;
+        }
+        if self.about_open {
+            self.about_open = false;
+        } else if self.selected.is_some() {
+            self.selected = None;
+            self.drag_mode = None;
+        } else if self.tab != Tab::Effects {
+            self.tab = Tab::Effects;
+        } else if !self.query.is_empty() {
+            self.query.clear();
+        } else {
+            self.category = None;
+        }
+    }
+
     /// The small modal for naming a new category or renaming one.
     fn show_cat_dialog(&mut self, ctx: &egui::Context) {
         let Some(d) = self.cat_dialog.as_mut() else { return };
@@ -2201,6 +2225,7 @@ impl Perf {
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let t_update = std::time::Instant::now();
+        self.escape_ladder(ctx);
         self.update_inner(ctx, frame);
         let cam_fps = *self.cap.cam_fps.lock().unwrap();
         if let Some(p) = self.perf.as_mut() {
@@ -2615,8 +2640,8 @@ impl Studio {
                     let n = fx.overlays.len();
                     for (tab, label) in [
                         (Tab::Effects, "Effects".to_string()),
-                        (Tab::Background, "Background".to_string()),
                         (Tab::Layers, if n > 0 { format!("Layers ({n})") } else { "Layers".into() }),
+                        (Tab::Background, "Background".to_string()),
                         (Tab::Adjust, "Adjust".to_string()),
                         (Tab::Audio, "Audio".to_string()),
                         (Tab::Setup, "Setup".to_string()),
@@ -2629,6 +2654,67 @@ impl Studio {
                 match self.tab {
                     Tab::Banner => self.banner_panel(ui, ctx, fx),
                     Tab::Effects => {
+                        // What is on the picture now, pinned under the effect grid: click one to
+                        // select it on the preview, × to take it off (Layers has the details).
+                        if !fx.overlays.is_empty() {
+                            let mut select: Option<usize> = None;
+                            let mut remove: Option<usize> = None;
+                            let mut to_layers = false;
+                            egui::TopBottomPanel::bottom("on-the-picture")
+                                .frame(egui::Frame::none().fill(theme::PANEL).inner_margin(egui::Margin { left: 0.0, right: 0.0, top: 6.0, bottom: 0.0 }))
+                                .show_inside(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("On the picture").small().strong());
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.small_button("Edit…").on_hover_text("Size, opacity, order: the Layers tab").clicked() {
+                                                to_layers = true;
+                                            }
+                                        });
+                                    });
+                                    egui::ScrollArea::vertical().max_height(74.0).auto_shrink([false, true]).show(ui, |ui| {
+                                        ui.horizontal_wrapped(|ui| {
+                                            for (i, ov) in fx.overlays.iter().enumerate() {
+                                                let is_sel = self.selected == Some(i);
+                                                egui::Frame::none()
+                                                    .fill(if is_sel { theme::CARD_HOVER } else { theme::CARD })
+                                                    .stroke(if is_sel { egui::Stroke::new(1.0_f32, theme::ACCENT) } else { egui::Stroke::NONE })
+                                                    .rounding(6.0)
+                                                    .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+                                                    .show(ui, |ui| {
+                                                        ui.horizontal(|ui| {
+                                                            ui.spacing_mut().item_spacing.x = 4.0;
+                                                            let src = ov.source.clone();
+                                                            let thumb = ov.thumb_key.as_deref().and_then(|k| {
+                                                                self.thumbs.get_for(k, || src.as_ref().and_then(library::effect_ref_of))
+                                                            });
+                                                            if let Some(t) = thumb {
+                                                                ui.add(egui::Image::new((t.id(), egui::vec2(24.0, 18.0))).rounding(3.0));
+                                                            }
+                                                            let name: String = ov.name.chars().take(14).collect();
+                                                            let color = if ov.on { theme::TEXT } else { theme::TEXT_DIM };
+                                                            if ui.add(egui::Label::new(egui::RichText::new(name).small().color(color)).sense(egui::Sense::click())).on_hover_text(&ov.name).clicked() {
+                                                                select = Some(i);
+                                                            }
+                                                            if ui.small_button("×").on_hover_text("Remove").clicked() {
+                                                                remove = Some(i);
+                                                            }
+                                                        });
+                                                    });
+                                            }
+                                        });
+                                    });
+                                });
+                            if let Some(i) = select {
+                                self.selected = Some(i);
+                            }
+                            if let Some(i) = remove {
+                                fx.overlays.remove(i);
+                                self.selected = None;
+                            }
+                            if to_layers {
+                                self.tab = Tab::Layers;
+                            }
+                        }
                         // Buttons first (right-aligned), the search box takes what is left —
                         // inside a one-row strip so the layout doesn't claim the whole panel.
                         let row = egui::vec2(ui.available_width(), 30.0);
@@ -2646,6 +2732,16 @@ impl Studio {
                             );
                             if resp.changed() && !self.query.is_empty() {
                                 self.category = None;
+                            }
+                            // Esc: clear the search (like "× Clear"); without one, back from a
+                            // category to all effects. The search box drops focus on Esc itself.
+                            let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+                            if esc && (resp.has_focus() || resp.lost_focus()) {
+                                if !self.query.is_empty() {
+                                    self.query.clear();
+                                } else {
+                                    self.category = None;
+                                }
                             }
                         });
                         ui.add_space(4.0);
