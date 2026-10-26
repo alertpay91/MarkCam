@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" data-frames="40" data-ms="40">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <ellipse cx="300" cy="545" rx="190" ry="26" fill="#000" fill-opacity="0.18"/>
+  <g transform="translate(270 360) rotate({{osc -3 3}}) scale({{osc 1 1.04}} {{osc 1 0.97}})" filter="url(#sh)">
+    <image href="emoji:fluent:Panda" x="-205.7143" y="-225.0000" width="411.4286" height="411.4286" />
+    <ellipse cx="-62" cy="-8" rx="38" ry="32" fill="#4a3d6e"/><ellipse cx="62" cy="-8" rx="38" ry="32" fill="#4a3d6e"/>
+    <path d="M-82 -6 Q-62 12 -42 -6 M42 -6 Q62 12 82 -6" stroke="#1a1430" stroke-width="7" fill="none" stroke-linecap="round"/>
+  </g>
+  <g transform="translate({{loop 0.00 390 500}} {{loop 0.00 220 20}}) scale({{loop 0.00 0.4 1.1}})" opacity="{{ph 0.50 0 1}}"><image href="emoji:fluent:Zzz" x="-63.3857" y="-75.2242" width="126.2780" height="126.2780" /></g>
+  <g transform="translate({{loop 0.33 390 500}} {{loop 0.33 220 20}}) scale({{loop 0.33 0.4 1.1}})" opacity="{{ph 0.83 0 1}}"><image href="emoji:fluent:Zzz" x="-63.3857" y="-75.2242" width="126.2780" height="126.2780" /></g>
+  <g transform="translate({{loop 0.67 390 500}} {{loop 0.67 220 20}}) scale({{loop 0.67 0.4 1.1}})" opacity="{{ph 1.17 0 1}}"><image href="emoji:fluent:Zzz" x="-63.3857" y="-75.2242" width="126.2780" height="126.2780" /></g>
+</svg>

@@ -427,8 +427,42 @@ pub fn list_images_in_dir(dir: &Path, category: &str) -> Vec<EffectRef> {
             }
         })
         .collect();
-    v.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+    v.sort_by(|a, b| natural_cmp(&a.display_name, &b.display_name));
     v
+}
+
+/// Case-insensitive order where numbers count as numbers ("Number 2" before "Number 10").
+pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut a, mut b) = (a.chars().peekable(), b.chars().peekable());
+    loop {
+        match (a.peek().copied(), b.peek().copied()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let num = |it: &mut std::iter::Peekable<std::str::Chars>| {
+                    let mut n = 0u64;
+                    while let Some(d) = it.peek().and_then(|c| c.to_digit(10)) {
+                        n = n.saturating_mul(10).saturating_add(d as u64);
+                        it.next();
+                    }
+                    n
+                };
+                let (na, nb) = (num(&mut a), num(&mut b));
+                if na != nb {
+                    return na.cmp(&nb);
+                }
+            }
+            (Some(x), Some(y)) => {
+                let o = x.to_lowercase().cmp(y.to_lowercase());
+                if o != std::cmp::Ordering::Equal {
+                    return o;
+                }
+                a.next();
+                b.next();
+            }
+        }
+    }
 }
 
 fn read_entry_by_name<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>, name: &str) -> Option<Vec<u8>> {
@@ -567,4 +601,14 @@ fn parse_face_mask(props_raw: &[u8]) -> FaceMask {
         })
         .unwrap_or_default();
     FaceMask { pivots }
+}
+
+#[cfg(test)]
+mod natural_order {
+    #[test]
+    fn numbers_sort_as_numbers() {
+        let mut v = vec!["Number 10", "number 2", "Letter B", "Number 1", "letter a"];
+        v.sort_by(|a, b| super::natural_cmp(a, b));
+        assert_eq!(v, ["letter a", "Letter B", "Number 1", "number 2", "Number 10"]);
+    }
 }

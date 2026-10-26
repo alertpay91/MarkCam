@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.0 -2.7 4.0 3.8" data-face="true" data-frames="30" data-ms="40">
+  <defs>
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb347"/><stop offset="1" stop-color="#e07b12"/></linearGradient>
+    <linearGradient id="in" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc0cf"/><stop offset="1" stop-color="#ff8fab"/></linearGradient>
+    <radialGradient id="nose" cx="0.4" cy="0.3" r="0.7"><stop offset="0" stop-color="#ffb3c6"/><stop offset="1" stop-color="#e05780"/></radialGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)">
+    <g transform="translate(-1.0 -1.6) rotate({{osc2 -3 5}})"><path d="M-0.55 0.25 L-0.35 -0.95 Q-0.3 -1.05 -0.2 -0.98 L0.6 -0.05 Z" fill="url(#ear)" stroke="#b85f0a" stroke-width="0.03" stroke-linejoin="round"/><path d="M-0.38 0.08 L-0.28 -0.68 L0.3 -0.08 Z" fill="url(#in)"/></g>
+    <g transform="translate(1.0 -1.6) rotate({{osc2 3 -5}}) scale(-1 1)"><path d="M-0.55 0.25 L-0.35 -0.95 Q-0.3 -1.05 -0.2 -0.98 L0.6 -0.05 Z" fill="url(#ear)" stroke="#b85f0a" stroke-width="0.03" stroke-linejoin="round"/><path d="M-0.38 0.08 L-0.28 -0.68 L0.3 -0.08 Z" fill="url(#in)"/></g>
+    <path d="M-0.17 0.5 L0.17 0.5 Q0.18 0.54 0.14 0.58 L0.02 0.7 Q0 0.72 -0.02 0.7 L-0.14 0.58 Q-0.18 0.54 -0.17 0.5 Z" fill="url(#nose)"/>
+  </g>
+  <g stroke="#3b2a20" stroke-opacity="0.8" stroke-width="0.03" stroke-linecap="round" fill="none">
+    <path d="M-0.35 0.68 Q-0.9 0.55 -1.5 0.5"/><path d="M-0.35 0.76 Q-0.9 0.76 -1.5 0.84"/><path d="M-0.35 0.84 Q-0.85 0.95 -1.35 1.12"/>
+    <path d="M0.35 0.68 Q0.9 0.55 1.5 0.5"/><path d="M0.35 0.76 Q0.9 0.76 1.5 0.84"/><path d="M0.35 0.84 Q0.85 0.95 1.35 1.12"/>
+  </g>
+</svg>

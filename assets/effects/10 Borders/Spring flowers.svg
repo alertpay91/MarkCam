@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" data-fullscreen="true">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <image href="emoji:fluent:Tulip" x="-46.3636" y="860.9091" width="232.7273" height="232.7273" />
+  <image href="emoji:fluent:Sunflower" x="42.9333" y="822.9333" width="273.0667" height="273.0667" />
+  <image href="emoji:fluent:Cherry blossom" x="227.6991" y="955.9956" width="124.6018" height="124.6018" />
+  <image href="emoji:fluent:Hibiscus" x="319.2377" y="973.9462" width="114.7982" height="114.7982" />
+  <image href="emoji:fluent:Tulip" x="1733.6364" y="860.9091" width="232.7273" height="232.7273" />
+  <image href="emoji:fluent:Sunflower" x="1602.9333" y="822.9333" width="273.0667" height="273.0667" />
+  <image href="emoji:fluent:Blossom" x="1551.0335" y="940.4190" width="157.3184" height="157.3184" />
+  <image href="emoji:fluent:Rose" x="1435.8015" y="932.2901" width="195.4198" height="195.4198" />
+  <image href="emoji:fluent:Seedling" x="424.2857" y="994.2857" width="91.4286" height="91.4286" />
+  <image href="emoji:fluent:Four leaf clover" x="1391.8182" y="981.8182" width="116.3636" height="116.3636" />
+  <g transform="translate({{osc 300 600}} {{osc2 250 180}}) rotate({{osc2 -10 10}})"><image href="emoji:fluent:Butterfly" x="-62.3333" y="-62.3333" width="125.1556" height="125.1556" /></g>
+  <g transform="translate({{osc 1650 1350}} {{osc2 300 230}}) rotate({{osc2 10 -10}})"><image href="emoji:fluent:Butterfly" x="-51.0000" y="-51.0000" width="102.4000" height="102.4000" /></g>
+  <g transform="translate({{ph 0.00 40 120}} {{loop 0.00 -40 1080}}) rotate({{loop 0.00 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+  <g transform="translate({{ph 0.12 291 371}} {{loop 0.12 -40 1080}}) rotate({{loop 0.12 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+  <g transform="translate({{ph 0.25 542 622}} {{loop 0.25 -40 1080}}) rotate({{loop 0.25 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+  <g transform="translate({{ph 0.38 793 873}} {{loop 0.38 -40 1080}}) rotate({{loop 0.38 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+  <g transform="translate({{ph 0.50 1044 1124}} {{loop 0.50 -40 1080}}) rotate({{loop 0.50 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+  <g transform="translate({{ph 0.62 1295 1375}} {{loop 0.62 -40 1080}}) rotate({{loop 0.62 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+  <g transform="translate({{ph 0.75 1546 1626}} {{loop 0.75 -40 1080}}) rotate({{loop 0.75 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+  <g transform="translate({{ph 0.88 1797 1877}} {{loop 0.88 -40 1080}}) rotate({{loop 0.88 0 360}})" opacity="0.85"><image href="emoji:fluent:Cherry blossom" x="-22.6549" y="-23.2743" width="45.3097" height="45.3097" /></g>
+</svg>

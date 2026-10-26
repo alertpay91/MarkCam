@@ -36,6 +36,9 @@ pub struct Settings {
     /// Color filter (`Filter::id`) and its intensity 0..1.
     pub filter: String,
     pub filter_amount: f32,
+    /// Whole-picture look (`Look::id`: neon, electricity, comic…) and its intensity 0..1.
+    pub look: String,
+    pub look_amount: f32,
     /// Vignette strength (0 = off).
     pub vignette: f32,
     /// Camera boost for weak webcams.
@@ -127,6 +130,8 @@ impl Default for Settings {
             ck_smoothness: ck.smoothness,
             filter: "none".into(),
             filter_amount: 1.0,
+            look: "none".into(),
+            look_amount: 1.0,
             vignette: 0.0,
             camera_boost: false,
             warp: "none".into(),

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-0.5 0.15 1.0 0.9" data-face="true" data-frames="20" data-ms="40">
+  <defs><radialGradient id="n" cx="0.36" cy="0.32" r="0.75"><stop offset="0" stop-color="#ff8a80"/><stop offset="0.45" stop-color="#e01b1b"/><stop offset="1" stop-color="#7a0000"/></radialGradient></defs>
+  <circle cx="0" cy="0.58" r="{{osc2 0.32 0.36}}" fill="url(#n)"/>
+  <ellipse cx="-0.1" cy="0.46" rx="0.1" ry="0.06" fill="#fff" fill-opacity="0.75" transform="rotate(-30 -0.1 0.46)"/>
+</svg>

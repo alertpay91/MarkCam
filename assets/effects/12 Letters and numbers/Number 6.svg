@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3bc9db"/><stop offset="1" stop-color="#0b7285"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <rect x="20" y="16" width="960" height="556" rx="56" fill="url(#bg)" stroke="#fff" stroke-width="10" filter="url(#sh)"/>
+  <path d="M76 26 H924 A48 48 0 0 1 970 70 V180 Q500.0 228 30 180 V70 A48 48 0 0 1 76 26 Z" fill="url(#gl)"/>
+  <text x="200" y="370" text-anchor="middle" font-family="Segoe UI" font-weight="900" font-size="300" fill="#fff" stroke="#1b1b2f" stroke-opacity="0.55" stroke-width="10" stroke-linejoin="round" paint-order="stroke">6</text>
+  <text x="200" y="490" text-anchor="middle" font-family="Segoe UI" font-weight="900" font-size="72" fill="#fff" stroke="#1b1b2f" stroke-opacity="0.55" stroke-width="7" stroke-linejoin="round" paint-order="stroke">six</text>
+  <rect x="390" y="70" width="580" height="440" rx="40" fill="#fff" fill-opacity="0.92"/>
+    <image href="emoji:fluent:Tropical fish" x="415.9048" y="103.9107" width="174.8571" height="174.8571" />
+  <image href="emoji:fluent:Tropical fish" x="602.5714" y="103.9107" width="174.8571" height="174.8571" />
+  <image href="emoji:fluent:Tropical fish" x="789.2381" y="103.9107" width="174.8571" height="174.8571" />
+  <image href="emoji:fluent:Tropical fish" x="415.9048" y="278.9107" width="174.8571" height="174.8571" />
+  <image href="emoji:fluent:Tropical fish" x="602.5714" y="278.9107" width="174.8571" height="174.8571" />
+  <image href="emoji:fluent:Tropical fish" x="789.2381" y="278.9107" width="174.8571" height="174.8571" />
+</svg>

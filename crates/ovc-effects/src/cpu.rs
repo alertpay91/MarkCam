@@ -587,6 +587,199 @@ impl WarpRenderer {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────────────
+// Looks (ManyCam's "Electricity" / "Red Contours" filters and friends, re-created):
+// whole-picture styles built from the picture's edges and brightness.
+// ─────────────────────────────────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Look {
+    None,
+    Neon,
+    Electric,
+    Contours,
+    Comic,
+    Sketch,
+    Thermal,
+}
+
+impl Look {
+    pub const ALL: [Look; 7] = [Look::None, Look::Neon, Look::Electric, Look::Contours, Look::Comic, Look::Sketch, Look::Thermal];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Look::None => "None",
+            Look::Neon => "Neon",
+            Look::Electric => "Electricity",
+            Look::Contours => "Red contours",
+            Look::Comic => "Comic",
+            Look::Sketch => "Pencil sketch",
+            Look::Thermal => "Thermal camera",
+        }
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Look::None => "none",
+            Look::Neon => "neon",
+            Look::Electric => "electric",
+            Look::Contours => "contours",
+            Look::Comic => "comic",
+            Look::Sketch => "sketch",
+            Look::Thermal => "thermal",
+        }
+    }
+
+    pub fn from_id(s: &str) -> Look {
+        Look::ALL.into_iter().find(|l| l.id() == s).unwrap_or(Look::None)
+    }
+}
+
+/// Keeps the scratch buffers of [`Look`] between frames.
+#[derive(Default)]
+pub struct LookRenderer {
+    luma: Vec<u8>,
+    edge: Vec<u8>,
+    frame: u32,
+}
+
+/// Cheap integer hash → 0..=255.
+fn hash8(a: u32, b: u32, c: u32) -> u32 {
+    let mut h = a.wrapping_mul(0x9E37_79B1) ^ b.wrapping_mul(0x85EB_CA77) ^ c.wrapping_mul(0xC2B2_AE3D);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2C1B_3C6D);
+    h ^= h >> 12;
+    h & 255
+}
+
+/// Heat palette: black → blue → purple → red → orange → yellow → white.
+fn thermal(v: u32) -> [u8; 3] {
+    const STOPS: [(u32, [f32; 3]); 7] = [
+        (0, [0.0, 0.0, 20.0]),
+        (50, [20.0, 30.0, 170.0]),
+        (100, [140.0, 20.0, 170.0]),
+        (150, [230.0, 30.0, 60.0]),
+        (195, [255.0, 140.0, 0.0]),
+        (230, [255.0, 230.0, 40.0]),
+        (255, [255.0, 255.0, 235.0]),
+    ];
+    let mut i = 0;
+    while i + 2 < STOPS.len() && v > STOPS[i + 1].0 {
+        i += 1;
+    }
+    let (a, ca) = STOPS[i];
+    let (b, cb) = STOPS[i + 1];
+    let t = (v.saturating_sub(a)) as f32 / (b - a).max(1) as f32;
+    let t = t.min(1.0);
+    [0, 1, 2].map(|k| (ca[k] + (cb[k] - ca[k]) * t) as u8)
+}
+
+impl LookRenderer {
+    /// Restyle `rgba` (`w*h*4`) in place. `t` = seconds (for the animated looks), `amount`
+    /// 0..1 blends with the original.
+    pub fn apply(&mut self, look: Look, rgba: &mut [u8], w: u32, h: u32, t: f32, amount: f32) {
+        let (wu, hu) = (w as usize, h as usize);
+        let n = wu * hu;
+        if look == Look::None || rgba.len() < n * 4 || w < 3 || h < 3 {
+            return;
+        }
+        self.frame = self.frame.wrapping_add(1);
+        self.luma.resize(n, 0);
+        self.edge.resize(n, 0);
+        for (l, p) in self.luma.iter_mut().zip(rgba.chunks_exact(4)) {
+            *l = ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8;
+        }
+        // Sobel magnitude (|gx| + |gy|), borders left at 0.
+        let gain: i32 = match look {
+            Look::Comic | Look::Contours => 3,
+            Look::Sketch => 2,
+            _ => 4,
+        };
+        for y in 1..hu - 1 {
+            let (r0, r1, r2) = ((y - 1) * wu, y * wu, (y + 1) * wu);
+            let l = &self.luma;
+            for x in 1..wu - 1 {
+                let p = |i: usize| l[i] as i32;
+                let gx = p(r0 + x + 1) + 2 * p(r1 + x + 1) + p(r2 + x + 1) - p(r0 + x - 1) - 2 * p(r1 + x - 1) - p(r2 + x - 1);
+                let gy = p(r2 + x - 1) + 2 * p(r2 + x) + p(r2 + x + 1) - p(r0 + x - 1) - 2 * p(r0 + x) - p(r0 + x + 1);
+                // Small differences are camera grain, not edges.
+                let m = ((gx.abs() + gy.abs()) / 4 - 10).max(0) * gain;
+                self.edge[r1 + x] = m.min(255) as u8;
+            }
+        }
+        let a = (amount.clamp(0.0, 1.0) * 256.0) as u32;
+        let mix = |o: u8, v: u8| ((o as u32 * (256 - a) + v as u32 * a) >> 8) as u8;
+        let frame = self.frame;
+        // Electricity flickers: a new brightness every few frames, sparks along the edges.
+        let flick = 150 + hash8(frame / 3, 7, 1) / 2;
+        let hue_shift = t * 0.15;
+        for y in 0..hu {
+            // Electricity: rows jitter sideways a little (the crackle).
+            let jit = if look == Look::Electric { (hash8(y as u32 / 6, frame / 2, 3) as i32 - 128) / 64 } else { 0 };
+            for x in 0..wu {
+                let i = y * wu + x;
+                let e = if jit != 0 { self.edge[y * wu + (x as i32 + jit).clamp(0, wu as i32 - 1) as usize] } else { self.edge[i] } as u32;
+                let px = &mut rgba[i * 4..i * 4 + 4];
+                let (r, g, b) = (px[0] as u32, px[1] as u32, px[2] as u32);
+                let out: [u8; 3] = match look {
+                    Look::None => [px[0], px[1], px[2]],
+                    Look::Neon => {
+                        // Glowing edges on a dark picture, colors drifting down the frame.
+                        let hue = (hue_shift + y as f32 / h as f32 * 0.6 + x as f32 / w as f32 * 0.25).fract() * 6.0;
+                        let (c, k) = (hue as u32, ((hue.fract()) * 255.0) as u32);
+                        let col = match c {
+                            0 => [255, k, 0],
+                            1 => [255 - k, 255, 0],
+                            2 => [0, 255, k],
+                            3 => [0, 255 - k, 255],
+                            4 => [k, 0, 255],
+                            _ => [255, 0, 255 - k],
+                        };
+                        [0, 1, 2].map(|j| (([r, g, b][j] / 8) + (col[j] * e) / 255).min(255) as u8)
+                    }
+                    Look::Electric => {
+                        let spark = e > 90 && hash8(x as u32, y as u32, frame) < 6;
+                        if spark {
+                            [255, 255, 255]
+                        } else {
+                            let e = e * flick / 255;
+                            let base = [r / 3, g / 3, (b / 2 + 20).min(255)];
+                            [
+                                (base[0] + e * 140 / 255).min(255) as u8,
+                                (base[1] + e * 210 / 255).min(255) as u8,
+                                (base[2] + e).min(255) as u8,
+                            ]
+                        }
+                    }
+                    Look::Contours => {
+                        let l = self.luma[i] as u32;
+                        [(l / 5 + e).min(255) as u8, (l / 6 + e / 6) as u8, (l / 6 + e / 8) as u8]
+                    }
+                    Look::Comic => {
+                        if e > 110 {
+                            [20, 18, 24]
+                        } else {
+                            // Fewer, brighter colors.
+                            let l = self.luma[i] as i32;
+                            let sat = |c: u32| ((l + (c as i32 - l) * 5 / 4).clamp(0, 255) as u32 + 32) / 64 * 64;
+                            [sat(r).min(255) as u8, sat(g).min(255) as u8, sat(b).min(255) as u8]
+                        }
+                    }
+                    Look::Sketch => {
+                        let l = self.luma[i] as u32;
+                        let v = (255 - e.min(255)) * (200 + l / 5) / 255;
+                        [v.min(255) as u8, (v * 250 / 255) as u8, (v * 238 / 255) as u8]
+                    }
+                    Look::Thermal => thermal(self.luma[i] as u32),
+                };
+                px[0] = mix(px[0], out[0]);
+                px[1] = mix(px[1], out[1]);
+                px[2] = mix(px[2], out[2]);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,6 +804,17 @@ mod tests {
                 Warp { kind, cx, cy, radius: 0.8, strength: 1.0 }.apply(&src, &mut dst, w, h, 1.0);
             }
         }
+        // Every look runs on an odd-sized frame; a flat picture has no edges.
+        let (lw, lh) = (37u32, 21u32);
+        let mut r = LookRenderer::default();
+        for look in Look::ALL {
+            let mut img = vec![128u8; (lw * lh * 4) as usize];
+            r.apply(look, &mut img, lw, lh, 0.5, 1.0);
+            if look == Look::None {
+                assert!(img.iter().all(|&v| v == 128));
+            }
+        }
+        assert!(r.edge.iter().all(|&e| e == 0));
         // Bulge at zero strength is the identity.
         Warp { kind: WarpKind::Bulge, cx: 0.5, cy: 0.5, radius: 0.3, strength: 0.0 }.apply(&src, &mut dst, w, h, 0.0);
         assert_eq!(src, dst);

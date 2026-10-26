@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.9 -4.6 3.8 5.45" data-face="true" data-frames="36" data-ms="40">
+  <defs>
+    <linearGradient id="ear" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#e9e6ef"/><stop offset="0.5" stop-color="#ffffff"/><stop offset="1" stop-color="#d7d2e0"/></linearGradient>
+    <linearGradient id="in" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb8cb"/><stop offset="1" stop-color="#ff8fab"/></linearGradient>
+    <radialGradient id="nose" cx="0.4" cy="0.3" r="0.7"><stop offset="0" stop-color="#ffc2d1"/><stop offset="1" stop-color="#e05780"/></radialGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)">
+    <g transform="translate(-0.65 -1.7) rotate({{osc -14 -6}})"><path d="M-0.42 0 C-0.6 -1.0 -0.5 -2.4 0 -2.7 C0.5 -2.4 0.6 -1.0 0.42 0 Z" fill="url(#ear)" stroke="#cfc8da" stroke-width="0.03"/><path d="M-0.22 -0.15 C-0.34 -0.9 -0.28 -2.05 0 -2.35 C0.28 -2.05 0.34 -0.9 0.22 -0.15 Z" fill="url(#in)"/></g>
+    <g transform="translate(0.65 -1.7) rotate({{ph 0.3 16 4}})"><path d="M-0.42 0 C-0.6 -1.0 -0.5 -2.4 0 -2.7 C0.5 -2.4 0.6 -1.0 0.42 0 Z" fill="url(#ear)" stroke="#cfc8da" stroke-width="0.03"/><path d="M-0.22 -0.15 C-0.34 -0.9 -0.28 -2.05 0 -2.35 C0.28 -2.05 0.34 -0.9 0.22 -0.15 Z" fill="url(#in)"/></g>
+    <path d="M-0.15 0.52 L0.15 0.52 Q0.16 0.56 0.12 0.6 L0.02 0.7 Q0 0.72 -0.02 0.7 L-0.12 0.6 Q-0.16 0.56 -0.15 0.52 Z" fill="url(#nose)"/>
+  </g>
+</svg>

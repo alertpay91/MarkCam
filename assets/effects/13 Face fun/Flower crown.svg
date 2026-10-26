@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.25 -2.45 4.5 1.85" data-face="true" data-frames="36" data-ms="40">
+  <defs>
+    <linearGradient id="lf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8be08b"/><stop offset="1" stop-color="#2f8f3a"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)">
+  <path d="M-1.8 -1.45 Q0 -2.4 1.8 -1.45" stroke="#3d7a35" stroke-width="0.06" fill="none"/>
+    <ellipse cx="-1.853" cy="-1.666" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(-110.0 -1.723 -1.546)"/>
+  <ellipse cx="-1.711" cy="-1.845" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(-90.0 -1.516 -1.725)"/>
+  <ellipse cx="-1.362" cy="-1.991" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(-70.0 -1.125 -1.871)"/>
+  <ellipse cx="-0.848" cy="-2.087" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(-50.0 -0.599 -1.967)"/>
+  <ellipse cx="-0.233" cy="-2.120" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(-30.0 0.000 -2.000)"/>
+  <ellipse cx="0.411" cy="-2.087" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(-10.0 0.599 -1.967)"/>
+  <ellipse cx="1.005" cy="-1.991" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(10.0 1.125 -1.871)"/>
+  <ellipse cx="1.477" cy="-1.845" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(30.0 1.516 -1.725)"/>
+  <ellipse cx="1.772" cy="-1.666" rx="0.26" ry="0.1" fill="url(#lf)" transform="rotate(50.0 1.723 -1.546)"/>
+    <g transform="translate(-1.723 -1.546) rotate({{ph 0.00 -5 5}})"><image href="emoji:fluent:Cherry blossom" x="-0.3512" y="-0.3608" width="0.7023" height="0.7023" /></g>
+  <g transform="translate(-1.516 -1.725) rotate({{ph 0.11 -5 5}})"><image href="emoji:fluent:Hibiscus" x="-0.3038" y="-0.2803" width="0.5740" height="0.5740" /></g>
+  <g transform="translate(-1.125 -1.871) rotate({{ph 0.22 -5 5}})"><image href="emoji:fluent:Blossom" x="-0.4451" y="-0.4485" width="0.8867" height="0.8867" /></g>
+  <g transform="translate(-0.599 -1.967) rotate({{ph 0.33 -5 5}})"><image href="emoji:fluent:Tulip" x="-0.4444" y="-0.4549" width="0.8889" height="0.8889" /></g>
+  <g transform="translate(0.000 -2.000) rotate({{ph 0.44 -5 5}})"><image href="emoji:fluent:Sunflower" x="-0.4553" y="-0.4553" width="0.9070" height="0.9070" /></g>
+  <g transform="translate(0.599 -1.967) rotate({{ph 0.56 -5 5}})"><image href="emoji:fluent:Rose" x="-0.5210" y="-0.4885" width="0.9771" height="0.9771" /></g>
+  <g transform="translate(1.125 -1.871) rotate({{ph 0.67 -5 5}})"><image href="emoji:fluent:Cherry blossom" x="-0.3512" y="-0.3608" width="0.7023" height="0.7023" /></g>
+  <g transform="translate(1.516 -1.725) rotate({{ph 0.78 -5 5}})"><image href="emoji:fluent:Hibiscus" x="-0.3038" y="-0.2803" width="0.5740" height="0.5740" /></g>
+  <g transform="translate(1.723 -1.546) rotate({{ph 0.89 -5 5}})"><image href="emoji:fluent:Blossom" x="-0.4451" y="-0.4485" width="0.8867" height="0.8867" /></g>
+  </g>
+</svg>

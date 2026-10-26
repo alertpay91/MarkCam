@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f783ac"/><stop offset="1" stop-color="#c2255c"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <rect x="20" y="16" width="960" height="556" rx="56" fill="url(#bg)" stroke="#fff" stroke-width="10" filter="url(#sh)"/>
+  <path d="M76 26 H924 A48 48 0 0 1 970 70 V180 Q500.0 228 30 180 V70 A48 48 0 0 1 76 26 Z" fill="url(#gl)"/>
+  <text x="200" y="370" text-anchor="middle" font-family="Segoe UI" font-weight="900" font-size="300" fill="#fff" stroke="#1b1b2f" stroke-opacity="0.55" stroke-width="10" stroke-linejoin="round" paint-order="stroke">3</text>
+  <text x="200" y="490" text-anchor="middle" font-family="Segoe UI" font-weight="900" font-size="72" fill="#fff" stroke="#1b1b2f" stroke-opacity="0.55" stroke-width="7" stroke-linejoin="round" paint-order="stroke">three</text>
+  <rect x="390" y="70" width="580" height="440" rx="40" fill="#fff" fill-opacity="0.92"/>
+    <image href="emoji:fluent:Banana" x="415.1697" y="199.0919" width="175.6413" height="175.6413" />
+  <image href="emoji:fluent:Banana" x="601.8363" y="199.0919" width="175.6413" height="175.6413" />
+  <image href="emoji:fluent:Banana" x="788.5030" y="199.0919" width="175.6413" height="175.6413" />
+</svg>

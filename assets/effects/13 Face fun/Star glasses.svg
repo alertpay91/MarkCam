@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.5 -0.75 3.0 1.45" data-face="true" data-frames="32" data-ms="40">
+  <defs>
+    <linearGradient id="lens" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4dd0ff" stop-opacity="0.75"/><stop offset="1" stop-color="#7b2ff7" stop-opacity="0.85"/></linearGradient>
+    <linearGradient id="fr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff3a0"/><stop offset="1" stop-color="#e09a00"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)">
+    <path d="M-0.2 -0.12 Q0 -0.24 0.2 -0.12" stroke="url(#fr)" stroke-width="0.08" fill="none" stroke-linecap="round"/>
+    <path d="M-1.12 -0.16 L-1.45 -0.2 M1.12 -0.16 L1.45 -0.2" stroke="url(#fr)" stroke-width="0.08" stroke-linecap="round"/>
+    <g transform="translate(-0.64 0) rotate({{osc -6 6}}) scale(1.2)"><path d="M0 -0.5 L0.12 -0.16 L0.48 -0.15 L0.19 0.07 L0.3 0.42 L0 0.21 L-0.3 0.42 L-0.19 0.07 L-0.48 -0.15 L-0.12 -0.16 Z" fill="url(#lens)" stroke="url(#fr)" stroke-width="0.07" stroke-linejoin="round"/><circle cx="-0.08" cy="-0.12" r="0.06" fill="#fff" fill-opacity="0.75"/></g>
+    <g transform="translate(0.64 0) rotate({{osc 6 -6}}) scale(1.2)"><path d="M0 -0.5 L0.12 -0.16 L0.48 -0.15 L0.19 0.07 L0.3 0.42 L0 0.21 L-0.3 0.42 L-0.19 0.07 L-0.48 -0.15 L-0.12 -0.16 Z" fill="url(#lens)" stroke="url(#fr)" stroke-width="0.07" stroke-linejoin="round"/><circle cx="-0.08" cy="-0.12" r="0.06" fill="#fff" fill-opacity="0.75"/></g>
+  </g>
+</svg>

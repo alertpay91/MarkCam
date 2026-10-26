@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9775fa"/><stop offset="1" stop-color="#5f3dc4"/></linearGradient>
+    <linearGradient id="gl" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <rect x="20" y="16" width="560" height="596" rx="56" fill="url(#bg)" stroke="#fff" stroke-width="10" filter="url(#sh)"/>
+  <path d="M76 26 H524 A48 48 0 0 1 570 70 V192 Q300.0 243 30 192 V70 A48 48 0 0 1 76 26 Z" fill="url(#gl)"/>
+  <text x="300" y="300" text-anchor="middle" font-family="Segoe UI" font-weight="900" font-size="270" fill="#fff" stroke="#1b1b2f" stroke-opacity="0.55" stroke-width="10" stroke-linejoin="round" paint-order="stroke">Vv</text>
+  <rect x="50" y="368" width="500" height="214" rx="40" fill="#fff" fill-opacity="0.92"/>
+  <image href="emoji:fluent:Violin" x="53.5650" y="377.0404" width="195.1570" height="195.1570" />
+  <text x="395" y="500" text-anchor="middle" font-family="Segoe UI" font-weight="900" font-size="62" fill="#1b1b2f"><tspan fill="#5f3dc4">v</tspan>iolin</text>
+</svg>

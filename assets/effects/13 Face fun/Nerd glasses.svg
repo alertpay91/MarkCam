@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.45 -0.6 2.9 1.2" data-face="true">
+  <defs>
+    <linearGradient id="lens" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="0.5" stop-color="#cfe8ff" stop-opacity="0.12"/><stop offset="1" stop-color="#fff" stop-opacity="0.25"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)" fill="url(#lens)" stroke="#16161a" stroke-width="0.12" stroke-linejoin="round">
+    <rect x="-1.12" y="-0.34" width="0.92" height="0.68" rx="0.16"/>
+    <rect x="0.2" y="-0.34" width="0.92" height="0.68" rx="0.16"/>
+    <path d="M-0.2 -0.1 Q0 -0.22 0.2 -0.1" fill="none"/>
+    <path d="M-1.12 -0.2 L-1.42 -0.24 M1.12 -0.2 L1.42 -0.24" fill="none"/>
+  </g>
+  <path d="M-1.0 -0.24 L-0.84 -0.24 L-1.02 0.2 L-1.06 0.08 Z M0.32 -0.24 L0.48 -0.24 L0.3 0.2 L0.26 0.08 Z" fill="#fff" fill-opacity="0.45"/>
+  <rect x="-0.09" y="-0.17" width="0.18" height="0.12" rx="0.03" fill="#fff" stroke="#999" stroke-width="0.015"/>
+</svg>

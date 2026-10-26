@@ -264,7 +264,7 @@ impl Library {
                         found.extend(ovc_mcam::list_effects_in_dir(&cat).unwrap_or_default().into_iter().map(Item::new));
                     }
                 }
-                found.sort_by(|a, b| a.name().to_lowercase().cmp(&b.name().to_lowercase()));
+                found.sort_by(|a, b| ovc_mcam::natural_cmp(a.name(), b.name()));
                 // The same effect often ships in a built-in pack *and* sits in the downloaded
                 // folders; show it once.
                 found.dedup_by(|a, b| a.name().eq_ignore_ascii_case(b.name()) && a.kind() == b.kind());

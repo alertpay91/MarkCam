@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 360" data-frames="60" data-ms="40">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <defs><linearGradient id="fin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9fb3c8"/><stop offset="1" stop-color="#4a5d73"/></linearGradient>
+  <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2fa8e0" stop-opacity="0.85"/><stop offset="1" stop-color="#0b4f8a" stop-opacity="0.95"/></linearGradient></defs>
+  <g transform="translate({{loop 0 -150 1050}} {{osc2 215 228}}) scale(1.7)"><path d="M-70 40 C-40 -10 0 -110 50 -130 C30 -80 40 -10 80 40 Z" fill="url(#fin)"/><path d="M-30 30 C-10 -10 20 -70 40 -100" stroke="#fff" stroke-opacity="0.35" stroke-width="5" fill="none"/></g>
+  <path d="M0 240 Q37.5 {{osc 222 258}} 75 240 Q112.5 {{osc 222 258}} 150 240 Q187.5 {{osc 222 258}} 225 240 Q262.5 {{osc 222 258}} 300 240 Q337.5 {{osc 222 258}} 375 240 Q412.5 {{osc 222 258}} 450 240 Q487.5 {{osc 222 258}} 525 240 Q562.5 {{osc 222 258}} 600 240 Q637.5 {{osc 222 258}} 675 240 Q712.5 {{osc 222 258}} 750 240 Q787.5 {{osc 222 258}} 825 240 Q862.5 {{osc 222 258}} 900 240 V360 H0 Z" fill="url(#sea)"/>
+  <path d="M0 236 Q37.5 {{osc 218 254}} 75 236 Q112.5 {{osc 218 254}} 150 236 Q187.5 {{osc 218 254}} 225 236 Q262.5 {{osc 218 254}} 300 236 Q337.5 {{osc 218 254}} 375 236 Q412.5 {{osc 218 254}} 450 236 Q487.5 {{osc 218 254}} 525 236 Q562.5 {{osc 218 254}} 600 236 Q637.5 {{osc 218 254}} 675 236 Q712.5 {{osc 218 254}} 750 236 Q787.5 {{osc 218 254}} 825 236 Q862.5 {{osc 218 254}} 900 236" stroke="#fff" stroke-opacity="0.75" stroke-width="6" fill="none"/>
+</svg>

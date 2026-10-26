@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2.35 -2.75 4.7 4.9" data-face="true" data-frames="30" data-ms="40">
+  <defs>
+    <linearGradient id="ear" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a86a3d"/><stop offset="1" stop-color="#6b3f1f"/></linearGradient>
+    <linearGradient id="in" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d79a72"/><stop offset="1" stop-color="#b07250"/></linearGradient>
+    <radialGradient id="nose" cx="0.38" cy="0.3" r="0.75"><stop offset="0" stop-color="#5a5a5a"/><stop offset="0.5" stop-color="#1b1b1b"/><stop offset="1" stop-color="#000"/></radialGradient>
+    <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff7b9c"/><stop offset="1" stop-color="#e2456b"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)">
+    <g transform="translate(-1.15 -1.75) rotate({{osc -4 10}})"><path d="M0 0 C-0.55 -0.2 -1.15 0.25 -1.1 1.15 C-1.05 1.8 -0.55 2.0 -0.3 1.6 C-0.05 1.2 0.2 0.6 0.25 0.15 Z" fill="url(#ear)"/><path d="M-0.15 0.25 C-0.55 0.15 -0.9 0.55 -0.85 1.15 C-0.82 1.5 -0.55 1.6 -0.4 1.35 C-0.2 1.0 -0.05 0.6 0 0.3 Z" fill="url(#in)"/></g>
+    <g transform="translate(1.15 -1.75) rotate({{osc 4 -10}}) scale(-1 1)"><path d="M0 0 C-0.55 -0.2 -1.15 0.25 -1.1 1.15 C-1.05 1.8 -0.55 2.0 -0.3 1.6 C-0.05 1.2 0.2 0.6 0.25 0.15 Z" fill="url(#ear)"/><path d="M-0.15 0.25 C-0.55 0.15 -0.9 0.55 -0.85 1.15 C-0.82 1.5 -0.55 1.6 -0.4 1.35 C-0.2 1.0 -0.05 0.6 0 0.3 Z" fill="url(#in)"/></g>
+    <g transform="translate(0 1.28) scale(1 {{osc2 0.75 1.15}})"><path d="M-0.26 0 L0.26 0 C0.3 0.35 0.24 0.62 0 0.64 C-0.24 0.62 -0.3 0.35 -0.26 0 Z" fill="url(#tg)"/><path d="M0 0.05 L0 0.4" stroke="#c42d55" stroke-width="0.03" stroke-linecap="round"/></g>
+    <path d="M-0.34 0.42 C-0.34 0.28 0.34 0.28 0.34 0.42 C0.34 0.62 0.12 0.78 0 0.78 C-0.12 0.78 -0.34 0.62 -0.34 0.42 Z" fill="url(#nose)"/>
+  </g>
+  <ellipse cx="-0.1" cy="0.42" rx="0.1" ry="0.05" fill="#fff" fill-opacity="0.6"/>
+</svg>

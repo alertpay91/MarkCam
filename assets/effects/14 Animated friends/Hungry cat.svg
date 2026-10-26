@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" data-frames="40" data-ms="40">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <g transform="translate(220 400) rotate({{osc2 -3 3}})" filter="url(#sh)"><image href="emoji:fluent:Cat face" x="-182.8571" y="-197.8571" width="365.7143" height="365.7143" /></g>
+  <g transform="translate(420 170) scale({{osc 0.95 1.05}})">
+    <image href="emoji:fluent:Thought balloon" x="-148.6547" y="-159.7309" width="298.4753" height="298.4753" />
+    <g transform="rotate({{osc -10 10}})"><image href="emoji:fluent:Fish" x="-74.2857" y="-92.9911" width="148.5714" height="148.5714" /></g>
+  </g>
+</svg>

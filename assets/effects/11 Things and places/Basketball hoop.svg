@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 700" data-frames="30" data-ms="40">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <g filter="url(#sh)">
+    <rect x="80" y="30" width="440" height="300" rx="14" fill="#fff" stroke="#ccc" stroke-width="6"/>
+    <rect x="215" y="140" width="170" height="130" fill="none" stroke="#e03131" stroke-width="10"/>
+    <rect x="80" y="30" width="440" height="300" rx="14" fill="none" stroke="#e03131" stroke-width="12"/>
+  </g>
+  <g transform="translate({{osc 300 300}} {{lin -120 760}}) rotate({{lin 0 360}})"><image href="emoji:fluent:Basketball" x="-62.8571" y="-62.8571" width="125.7143" height="125.7143" /></g>
+  <path d="M190 290 L225 520 L375 520 L410 290 M215 290 L265 520 M260 290 L300 520 M340 290 L300 520 M385 290 L335 520 M200 360 L400 360 M210 440 L390 440" stroke="#f1f3f5" stroke-width="7" fill="none" stroke-linejoin="round"/>
+  <ellipse cx="300" cy="290" rx="115" ry="22" fill="none" stroke="#f76707" stroke-width="14"/>
+</svg>

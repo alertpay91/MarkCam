@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" data-frames="40" data-ms="40">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <g transform="translate(260 350) rotate({{osc -6 6}})" filter="url(#sh)">
+    <image href="emoji:fluent:Cat face" x="-171.4286" y="-225.4911" width="342.8571" height="342.8571" />
+    <g transform="translate(40 120) rotate({{osc2 -8 2}})"><image href="emoji:fluent:Guitar" x="-147.3333" y="-151.9556" width="295.8222" height="295.8222" /></g>
+  </g>
+  <g transform="translate({{loop 0.00 400 520}} {{loop 0.00 260 40}}) rotate({{ph 0.00 -20 20}})" opacity="{{ph 0.50 0 1}}"><image href="emoji:fluent:Musical notes" x="-45.7143" y="-47.8571" width="91.4286" height="91.4286" /></g><g transform="translate({{loop 0.33 400 520}} {{loop 0.33 260 40}}) rotate({{ph 0.33 -20 20}})" opacity="{{ph 0.83 0 1}}"><image href="emoji:fluent:Musical note" x="-47.8140" y="-47.8140" width="95.2558" height="95.2558" /></g><g transform="translate({{loop 0.67 400 520}} {{loop 0.67 260 40}}) rotate({{ph 0.67 -20 20}})" opacity="{{ph 1.17 0 1}}"><image href="emoji:fluent:Musical notes" x="-45.7143" y="-47.8571" width="91.4286" height="91.4286" /></g>
+</svg>

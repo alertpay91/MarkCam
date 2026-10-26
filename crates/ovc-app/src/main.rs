@@ -46,7 +46,7 @@ use ovc_core::{PixelFormat, VideoFormat};
 use ovc_effects::{
     builtin::{BackgroundBlur, ChromaKey, ColorGrade},
     anim::AnimKind,
-    cpu::{Filter, Warp, WarpKind},
+    cpu::{Filter, Look, Warp, WarpKind},
     Effect,
 };
 use ovc_gpu::{EffectChain, GpuContext, OutputMode};
@@ -1095,6 +1095,9 @@ struct Fx {
     ck: ChromaKey,
     filter: Filter,
     filter_amount: f32,
+    look: Look,
+    look_amount: f32,
+    look_r: ovc_effects::cpu::LookRenderer,
     vignette_amount: f32,
     vignette: ovc_effects::cpu::Vignette,
     /// Camera boost (weak webcams): automatic light/color + calmer grain + crisper edges.
@@ -1169,6 +1172,9 @@ impl Fx {
             ck: ChromaKey::default(),
             filter: Filter::None,
             filter_amount: 1.0,
+            look: Look::None,
+            look_amount: 1.0,
+            look_r: Default::default(),
             vignette_amount: 0.0,
             vignette: Default::default(),
             boost_on: false,
@@ -1408,11 +1414,14 @@ impl Fx {
             use_work = true;
         }
 
-        // 3. Vignette, animated overlays and effect layers draw in place.
-        if (overlays_on || self.vignette_amount > 0.0 || !self.anims.is_empty()) && !use_work {
+        // 3. Look, vignette, animated overlays and effect layers draw in place.
+        if (overlays_on || self.vignette_amount > 0.0 || !self.anims.is_empty() || self.look != Look::None) && !use_work {
             self.work.clear();
             self.work.extend_from_slice(base);
             use_work = true;
+        }
+        if self.look != Look::None {
+            self.look_r.apply(self.look, &mut self.work, w, h, self.started.elapsed().as_secs_f32(), self.look_amount);
         }
         if self.vignette_amount > 0.0 {
             self.vignette.apply(&mut self.work, w, h, self.vignette_amount.clamp(0.0, 1.0));
@@ -1778,6 +1787,8 @@ impl Studio {
         fx.ck.params.smoothness = c.ck_smoothness;
         fx.filter = Filter::from_id(&c.filter);
         fx.filter_amount = c.filter_amount;
+        fx.look = Look::from_id(&c.look);
+        fx.look_amount = c.look_amount;
         fx.vignette_amount = c.vignette;
         fx.boost_on = c.camera_boost;
         fx.warp = Warp {
@@ -2152,6 +2163,8 @@ impl Studio {
             ck_smoothness: fx.ck.params.smoothness,
             filter: fx.filter.id().into(),
             filter_amount: fx.filter_amount,
+            look: fx.look.id().into(),
+            look_amount: fx.look_amount,
             vignette: fx.vignette_amount,
             camera_boost: fx.boost_on,
             warp: fx.warp.kind.id().into(),
@@ -2978,6 +2991,9 @@ impl Studio {
                                             if theme::list_row(ui, "Distortions", WarpKind::ALL.len() - 1).clicked() {
                                                 self.tab = Tab::Adjust;
                                             }
+                                            if theme::list_row(ui, "Looks (Neon, Electricity, Comic…)", Look::ALL.len() - 1).clicked() {
+                                                self.tab = Tab::Adjust;
+                                            }
                                             if theme::list_row(ui, "Color filters", Filter::ALL.len() - 1).clicked() {
                                                 self.tab = Tab::Adjust;
                                             }
@@ -3442,6 +3458,20 @@ impl Studio {
                                             );
                                         }
                                     }
+                                }
+                            });
+                            ui.add_space(6.0);
+                            theme::section(ui, "Look");
+                            theme::card(ui, |ui| {
+                                ui.horizontal_wrapped(|ui| {
+                                    for l in Look::ALL {
+                                        if ui.selectable_label(fx.look == l, l.name()).clicked() {
+                                            fx.look = l;
+                                        }
+                                    }
+                                });
+                                if fx.look != Look::None {
+                                    ui.add(egui::Slider::new(&mut fx.look_amount, 0.0..=1.0).text("Intensity"));
                                 }
                             });
                             ui.add_space(6.0);

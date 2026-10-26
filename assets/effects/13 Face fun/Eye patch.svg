@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.7 -1.05 3.4 1.6" data-face="true">
+  <defs>
+    <radialGradient id="p" cx="0.4" cy="0.35" r="0.7"><stop offset="0" stop-color="#3a3a3a"/><stop offset="1" stop-color="#050505"/></radialGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)">
+    <path d="M-1.65 -0.85 L1.2 0.0 M0.0 -0.05 L1.65 -0.5" stroke="#111" stroke-width="0.07" stroke-linecap="round"/>
+    <path d="M0.6 -0.36 C0.95 -0.36 1.0 0.0 0.95 0.18 C0.85 0.42 0.35 0.42 0.25 0.18 C0.2 0.0 0.25 -0.36 0.6 -0.36 Z" fill="url(#p)"/>
+  </g>
+</svg>

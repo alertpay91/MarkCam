@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" data-frames="40" data-ms="40">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <g transform="translate(300 {{osc2 350 330}}) rotate({{osc -6 6}})" filter="url(#sh)">
+    <image href="emoji:fluent:Dog face" x="-194.2857" y="-176.4286" width="388.5714" height="388.5714" />
+    <g transform="translate(90 -150) rotate(18)">
+      <path d="M0 -150 L62 20 Q0 40 -62 20 Z" fill="#7b2ff7"/><path d="M-30 -60 L40 -80 L48 -58 L-22 -38 Z M-50 0 L55 -30 L60 -10 L-55 20 Z" fill="#ffd43b"/>
+      <circle cx="0" cy="-152" r="17" fill="#ff6bcb"/>
+    </g>
+  </g>
+  <rect x="40" y="{{loop 0.00 -20 620}}" width="14" height="22" rx="3" fill="#ff6b6b" transform="rotate({{loop 0.00 0 -360}} 47 300)"/><rect x="110" y="{{loop 0.11 -20 620}}" width="14" height="22" rx="3" fill="#ffd43b" transform="rotate({{loop 0.11 0 360}} 117 300)"/><rect x="170" y="{{loop 0.22 -20 620}}" width="14" height="22" rx="3" fill="#4dabf7" transform="rotate({{loop 0.22 0 -360}} 177 300)"/><rect x="240" y="{{loop 0.33 -20 620}}" width="14" height="22" rx="3" fill="#69db7c" transform="rotate({{loop 0.33 0 360}} 247 300)"/><rect x="320" y="{{loop 0.44 -20 620}}" width="14" height="22" rx="3" fill="#f783ac" transform="rotate({{loop 0.44 0 -360}} 327 300)"/><rect x="390" y="{{loop 0.56 -20 620}}" width="14" height="22" rx="3" fill="#9775fa" transform="rotate({{loop 0.56 0 360}} 397 300)"/><rect x="450" y="{{loop 0.67 -20 620}}" width="14" height="22" rx="3" fill="#ffa94d" transform="rotate({{loop 0.67 0 -360}} 457 300)"/><rect x="520" y="{{loop 0.78 -20 620}}" width="14" height="22" rx="3" fill="#3bc9db" transform="rotate({{loop 0.78 0 360}} 527 300)"/><rect x="570" y="{{loop 0.89 -20 620}}" width="14" height="22" rx="3" fill="#ff6b6b" transform="rotate({{loop 0.89 0 -360}} 577 300)"/>
+</svg>

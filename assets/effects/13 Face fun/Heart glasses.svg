@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1.5 -0.75 3.0 1.45" data-face="true" data-frames="24" data-ms="40">
+  <defs>
+    <linearGradient id="lens" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff4d8d" stop-opacity="0.8"/><stop offset="1" stop-color="#c2185b" stop-opacity="0.9"/></linearGradient>
+    <linearGradient id="fr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ff8fb5"/><stop offset="1" stop-color="#b0003a"/></linearGradient>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="0.04" stdDeviation="0.04" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <g filter="url(#sh)">
+    <path d="M-0.18 -0.18 Q0 -0.3 0.18 -0.18" stroke="url(#fr)" stroke-width="0.08" fill="none" stroke-linecap="round"/>
+    <path d="M-1.1 -0.2 L-1.45 -0.22 M1.1 -0.2 L1.45 -0.22" stroke="url(#fr)" stroke-width="0.08" stroke-linecap="round"/>
+    <g transform="translate(-0.64 0.0) scale({{osc2 1 1.1}})"><path d="M0 0.36 C-0.3 0.16 -0.5 0.02 -0.5 -0.17 C-0.5 -0.33 -0.38 -0.43 -0.24 -0.43 C-0.13 -0.43 -0.04 -0.37 0 -0.28 C0.04 -0.37 0.13 -0.43 0.24 -0.43 C0.38 -0.43 0.5 -0.33 0.5 -0.17 C0.5 0.02 0.3 0.16 0 0.36 Z" transform="scale(1.15)" fill="url(#lens)" stroke="url(#fr)" stroke-width="0.075"/><ellipse cx="-0.2" cy="-0.22" rx="0.1" ry="0.06" fill="#fff" fill-opacity="0.7" transform="rotate(-30 -0.2 -0.22)"/></g>
+    <g transform="translate(0.64 0.0) scale({{osc2 1 1.1}})"><path d="M0 0.36 C-0.3 0.16 -0.5 0.02 -0.5 -0.17 C-0.5 -0.33 -0.38 -0.43 -0.24 -0.43 C-0.13 -0.43 -0.04 -0.37 0 -0.28 C0.04 -0.37 0.13 -0.43 0.24 -0.43 C0.38 -0.43 0.5 -0.33 0.5 -0.17 C0.5 0.02 0.3 0.16 0 0.36 Z" transform="scale(1.15)" fill="url(#lens)" stroke="url(#fr)" stroke-width="0.075"/><ellipse cx="-0.2" cy="-0.22" rx="0.1" ry="0.06" fill="#fff" fill-opacity="0.7" transform="rotate(-30 -0.2 -0.22)"/></g>
+  </g>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" data-fullscreen="true">
+  <defs><filter id="sh" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.35"/></filter></defs>
+  <defs><linearGradient id="sand" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe3a3"/><stop offset="1" stop-color="#e8b864"/></linearGradient></defs>
+  <path d="M0 960 Q300 920 640 970 Q960 1010 1280 965 Q1620 925 1920 965 V1080 H0 Z" fill="url(#sand)" filter="url(#sh)"/>
+  <image href="emoji:fluent:Palm tree" x="-150.0000" y="440.0000" width="640.0000" height="640.0000" />
+  <image href="emoji:fluent:Palm tree" x="1527.1429" y="537.1429" width="525.7143" height="525.7143" transform="scale(-1 1) translate(-3580 0)"/>
+  <image href="emoji:fluent:Spiral shell" x="514.2857" y="962.8571" width="91.4286" height="91.4286" />
+  <image href="emoji:fluent:Crab" x="1321.4286" y="925.0000" width="137.1429" height="137.1429" />
+  <image href="emoji:fluent:Beach with umbrella" x="1475.0000" y="867.0000" width="170.6667" height="170.6667" />
+  <g transform="translate(1700 {{osc 120 150}})"><image href="emoji:fluent:Sun" x="-117.4312" y="-117.4312" width="234.8624" height="234.8624" /></g>
+</svg>
