@@ -1,6 +1,6 @@
 //! Face tracking for mask effects: UltraFace (`version-RFB-320`) finds the face box, then a
-//! landmark model regresses points that are reduced to the 68 dlib/iBUG landmarks ManyCam
-//! mask pivots use. Two landmark backends are supported:
+//! landmark model regresses points that are reduced to the 68 dlib/iBUG landmarks the face
+//! stickers are placed by. Two landmark backends are supported:
 //!   * [`Lmk::Fan256`]  — 2DFAN4 (256 input, outputs 68 points directly in dlib order; heavy).
 //!   * [`Lmk::Insight106`] — InsightFace 2d106det (192 input, 106 points; small + fast). Its
 //!     106 points are reduced to the 68 dlib points via [`INSIGHT106_TO_68`].

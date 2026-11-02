@@ -74,6 +74,9 @@ pub struct Settings {
     pub link_quality: u32,
 
     pub vcam_on: bool,
+    /// Layers that no longer load (a source kind this version doesn't have) are skipped,
+    /// not a reason to lose all settings.
+    #[serde(deserialize_with = "known_layers")]
     pub layers: Vec<SavedLayer>,
 
     /// UI state: right-panel tab and the effect category last browsed.
@@ -84,6 +87,8 @@ pub struct Settings {
     /// A new key: the old `background_preview_fps` defaulted to 15, which people took for a
     /// bug, so everyone starts again from 30.
     pub preview_fps_behind: u32,
+    /// The app's look (`theme::Palette::id`).
+    pub theme: String,
     /// Close the webcam while MarkCam is minimized and no app uses the virtual camera.
     pub idle_camera: bool,
     /// Where "Download" saves videos (`None` = Videos\MarkCam).
@@ -100,8 +105,6 @@ pub struct Settings {
     pub key_similarity: f32,
     pub key_smoothness: f32,
     pub key_ai: bool,
-    /// Also list an installed ManyCam's effects and backgrounds.
-    pub use_manycam: bool,
     /// Saved name banners and the one last used.
     pub banners: Vec<crate::banner::BannerDef>,
     pub banner_sel: usize,
@@ -157,6 +160,7 @@ impl Default for Settings {
             tab: "effects".into(),
             category: None,
             preview_fps_behind: 30,
+            theme: "midnight".into(),
             idle_camera: true,
             download_dir: None,
             background: "off".into(),
@@ -167,7 +171,6 @@ impl Default for Settings {
             key_similarity: 0.2,
             key_smoothness: 0.08,
             key_ai: true,
-            use_manycam: false,
             banners: vec![crate::banner::BannerDef::default()],
             banner_sel: 0,
         }
@@ -177,12 +180,8 @@ impl Default for Settings {
 /// Where an effect layer came from, so it can be re-loaded on the next start.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub enum LayerSource {
-    /// A loose PNG/JPG.
+    /// A picture or animation file (PNG, GIF, WebP…).
     Image(PathBuf),
-    /// A `.mcv` inside a ManyCam `.mcep` pack.
-    PackEntry { pack: PathBuf, mcv: String },
-    /// A standalone `.mcv` file.
-    McvFile(PathBuf),
     /// A video file (MP4…), played in a loop.
     Video(PathBuf),
 }
@@ -232,6 +231,11 @@ pub fn path() -> PathBuf {
 }
 
 /// Saved settings, or defaults if there are none / they can't be read.
+fn known_layers<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<SavedLayer>, D::Error> {
+    let raw: Vec<serde_json::Value> = Deserialize::deserialize(d)?;
+    Ok(raw.into_iter().filter_map(|v| serde_json::from_value(v).ok()).collect())
+}
+
 pub fn load() -> Settings {
     std::fs::read(path())
         .ok()

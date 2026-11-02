@@ -1,7 +1,7 @@
 //! Audio for lessons: the **MarkCam Microphone**.
 //!
-//! Windows has no API to create a microphone from an app (ManyCam ships its own signed
-//! kernel driver). MarkCam instead installs the free, signed VB-CABLE virtual cable once
+//! Windows has no API to create a microphone from an app (that takes a signed kernel
+//! driver). MarkCam instead installs the free, signed VB-CABLE virtual cable once
 //! and renames its microphone end to "MarkCam Microphone". While MarkCam runs it mixes
 //! **your real microphone + the sound of the video / link you play** into it — so in
 //! ClassIn you pick "MarkCam Microphone" while showing a video and switch back after.

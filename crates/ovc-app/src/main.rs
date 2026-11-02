@@ -12,8 +12,8 @@ mod theme;
 mod audio;
 mod autostart;
 
-/// A build to share with everyone (MARKCAM_PUBLIC=1 at build time): no ManyCam options
-/// (only MarkCam's own effects), the VB-CABLE name kept visible on the microphone.
+/// A build to share with everyone (MARKCAM_PUBLIC=1 at build time): the VB-CABLE name kept
+/// visible on the microphone, and a daily look for a newer release.
 pub const PUBLIC: bool = option_env!("MARKCAM_PUBLIC").is_some();
 
 /// What the system asks before an admin step (in "confirm the … prompt").
@@ -162,7 +162,7 @@ fn worker(
     let mut tick = std::time::Instant::now();
     let mut last_frame: Option<std::time::Instant> = None;
     // Idle webcam: closed while nobody sees the picture (MarkCam minimized, no app using the
-    // virtual camera) — like ManyCam, the app then costs next to nothing. Checked twice a
+    // virtual camera) — the app then costs next to nothing. Checked twice a
     // second; reopened as soon as an app starts pulling frames or the window comes back.
     let mut idle = false;
     let mut unseen_since: Option<std::time::Instant> = None;
@@ -278,9 +278,9 @@ fn rerun_if_due(fx: &Mutex<Fx>, ui: &egui::Context) {
     }
 }
 
-/// A visual composited on top of the processed frame: a loose PNG/JPG, or a ManyCam effect
-/// (still `object`/`fullscreen_object` or animated `animation`). Placed at a normalized
-/// rectangle (fractions of the frame) and alpha-blended on the CPU after the GPU chain.
+/// A visual composited on top of the processed frame: a picture, an animation, a video or a
+/// face sticker. Placed at a normalized rectangle (fractions of the frame) and
+/// alpha-blended on the CPU after the GPU chain.
 /// Animated effects advance frames by their per-frame GIF delays.
 struct Overlay {
     name: String,
@@ -305,11 +305,8 @@ struct Overlay {
     /// looping GIF is resized once, not 30 times a second.
     scaled: Vec<Vec<u8>>,
     scaled_size: (u32, u32),
-    // Face mask: pivot points (normalized to the mask image) matching 68 dlib landmarks.
-    // `Some` means this layer is warped onto detected landmarks instead of rectangle-placed.
-    face: Option<Vec<[f32; 2]>>,
-    /// Face-anchored sticker (ManyCam `type: "face"` without mask pivots: hats, glasses,
-    /// beards, emoji faces): `(center offset, size)` in face units, where the origin is the
+    /// Face sticker (hats, glasses, beards, emoji faces; `<image>.face.json`):
+    /// `(center offset, size)` in face units, where the origin is the
     /// point between the eyes, +y points down the face, and 1 unit ≈ 0.84 × eye distance.
     anchor: Option<([f32; 2], [f32; 2])>,
     /// Smoothed face pose `(cx, cy, unit, angle)` in pixels/radians, so stickers don't
@@ -318,6 +315,9 @@ struct Overlay {
     /// Normalized bounding box `[x0, y0, x1, y1]` of where it was last drawn (for clicking
     /// / selecting face-following layers, whose position isn't `pos`).
     drawn: Option<[f32; 4]>,
+    /// Face sticker: where it was blitted this frame `(center px, size px, angle)`, so the
+    /// mirrored preview can draw it again without stepping the animation.
+    last_face: Option<((f32, f32), (u32, u32), f32)>,
     /// Video layer: frames come from a background decoder instead of `frames`.
     video: Option<video::VideoStream>,
     video_seq: u64,
@@ -343,9 +343,9 @@ fn key_out_green(rgba: &mut [u8]) {
     }
 }
 
-/// ManyCam's face unit relative to the distance between the eye centers. Derived from
-/// its stickers: glasses ≈ 2.9 units wide (≈ face width ≈ 2.4 eye distances), mouth at
-/// +1.19 units below the eyes (≈ one eye distance).
+/// The face unit relative to the distance between the eye centers: glasses ≈ 2.9 units
+/// wide (≈ face width ≈ 2.4 eye distances), mouth at +1.19 units below the eyes (≈ one
+/// eye distance).
 const FACE_UNIT_PER_IPD: f32 = 0.84;
 
 /// A PNG / JPG / (animated) GIF as an effect layer.
@@ -362,15 +362,12 @@ fn overlay_from_video(path: &Path) -> anyhow::Result<Overlay> {
     let (_, rgba, w, h) = v.latest().ok_or_else(|| anyhow::anyhow!("no video frame"))?;
     let e = ovc_mcam::Effect {
         name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
-        author: String::new(),
         kind: ovc_mcam::Kind::Animation,
-        raw_type: "object".into(),
+        fullscreen: false,
         position: [0.0, 0.0],
         size: [1.0, 1.0],
-        canvas_aspect: 0.0,
         repeat: true,
         frames: vec![ovc_mcam::Frame { rgba: rgba.as_ref().clone(), w, h, delay_ms: 0 }],
-        face: None,
     };
     let mut ov = overlay_from_effect(e);
     ov.video = Some(v);
@@ -380,11 +377,10 @@ fn overlay_from_video(path: &Path) -> anyhow::Result<Overlay> {
 }
 
 fn layer_source(r: &ovc_mcam::EffectRef) -> settings::LayerSource {
-    match &r.file {
-        Some(p) if video::is_video_file(p) => settings::LayerSource::Video(p.clone()),
-        Some(p) if ovc_mcam::is_image_file(p) => settings::LayerSource::Image(p.clone()),
-        Some(p) => settings::LayerSource::McvFile(p.clone()),
-        None => settings::LayerSource::PackEntry { pack: r.pack_path.clone(), mcv: r.mcv_name.clone() },
+    if video::is_video_file(&r.file) {
+        settings::LayerSource::Video(r.file.clone())
+    } else {
+        settings::LayerSource::Image(r.file.clone())
     }
 }
 
@@ -393,10 +389,6 @@ fn overlay_from_saved(s: &settings::SavedLayer) -> Option<Overlay> {
     use settings::LayerSource as L;
     let (mut ov, key) = match &s.source {
         L::Image(p) => (overlay_from_file(p).ok()?, Some(p.to_string_lossy().into_owned())),
-        L::PackEntry { pack, mcv } => {
-            (overlay_from_effect(ovc_mcam::load_effect(pack, mcv).ok()?), Some(format!("{}|{}", pack.display(), mcv)))
-        }
-        L::McvFile(p) => (overlay_from_effect(ovc_mcam::load_mcv_file(p).ok()?), Some(p.to_string_lossy().into_owned())),
         L::Video(p) => (overlay_from_video(p).ok()?, Some(p.to_string_lossy().into_owned())),
     };
     ov.remove_green = s.remove_green;
@@ -412,11 +404,9 @@ fn overlay_from_saved(s: &settings::SavedLayer) -> Option<Overlay> {
 }
 
 fn overlay_from_effect(e: ovc_mcam::Effect) -> Overlay {
-    let face = e.face.as_ref().filter(|f| f.pivots.len() >= 3).map(|f| f.pivots.clone());
     // Start at a sensible size: full-frame for borders, otherwise ~1/3 of the frame height,
-    // aspect-correct (assuming a ~16:9 preview), centered. ManyCam's stored sizes are canvas
-    // fractions that often come out oversized here, so we normalize instead.
-    let (pos, size) = if e.raw_type == "fullscreen_object" {
+    // aspect-correct (assuming a ~16:9 preview), centered.
+    let (pos, size) = if e.fullscreen {
         ([0.0, 0.0], [1.0, 1.0])
     } else {
         let (iw, ih) = e.frames.first().map(|f| (f.w as f32, f.h as f32)).unwrap_or((1.0, 1.0));
@@ -424,10 +414,8 @@ fn overlay_from_effect(e: ovc_mcam::Effect) -> Overlay {
         let wfrac = (hfrac * (iw / ih.max(1.0)) * (9.0 / 16.0)).clamp(0.05, 0.9);
         ([0.5 - wfrac / 2.0, 0.5 - hfrac / 2.0], [wfrac, hfrac])
     };
-    let anchored = e.kind == ovc_mcam::Kind::FaceMask && face.is_none();
-    let anchor = anchored.then_some((e.position, e.size));
+    let anchor = (e.kind == ovc_mcam::Kind::FaceMask).then_some((e.position, e.size));
     let mut o = Overlay::new(e.name, e.frames, e.repeat, pos, size);
-    o.face = face;
     o.anchor = anchor;
     o
 }
@@ -451,10 +439,10 @@ impl Overlay {
             cache_key: (usize::MAX, 0, 0),
             scaled: Vec::new(),
             scaled_size: (0, 0),
-            face: None,
             anchor: None,
             pose: None,
             drawn: None,
+            last_face: None,
             video: None,
             video_seq: 0,
             remove_green: false,
@@ -463,9 +451,9 @@ impl Overlay {
         }
     }
 
-    /// Follows the face (mask or anchored sticker) rather than sitting at `pos`.
+    /// Follows the face (a face sticker) rather than sitting at `pos`.
     fn follows_face(&self) -> bool {
-        self.face.is_some() || self.anchor.is_some()
+        self.anchor.is_some()
     }
 
     /// Normalized rect for hit-testing / the selection outline.
@@ -564,6 +552,7 @@ impl Overlay {
     /// Draw a face-anchored sticker on the face described by 68 normalized landmarks:
     /// placed relative to the eyes, scaled with the face and rotated with head tilt.
     fn composite_face(&mut self, rgba: &mut [u8], w: u32, h: u32, lms: &[[f32; 2]]) {
+        self.last_face = None;
         let Some((apos, asize)) = self.anchor else { return };
         if self.frames.is_empty() || lms.len() < 48 || w == 0 || h == 0 {
             return;
@@ -601,7 +590,28 @@ impl Overlay {
         if !self.ensure_cache(tw, th) {
             return;
         }
+        self.last_face = Some(((cx, cy), (tw, th), angle));
         self.drawn = Some(self.blit_rotated(rgba, w, h, (cx, cy), (tw, th), angle));
+    }
+
+    /// Draw the face sticker again where `composite_face` put it this frame.
+    fn redraw_face(&self, rgba: &mut [u8], w: u32, h: u32) {
+        if let Some((c, (tw, th), angle)) = self.last_face {
+            if self.cache.len() >= (tw * th * 4) as usize {
+                self.blit_rotated(rgba, w, h, c, (tw, th), angle);
+            }
+        }
+    }
+
+    /// Mirrored preview: draw this placed layer where the mirror shows it, but not flipped,
+    /// so text on it reads normally. Uses the frame `composite` prepared this frame.
+    fn blit_mirrored(&self, rgba: &mut [u8], w: u32, h: u32) {
+        let (_, tw, th) = self.cache_key;
+        if tw == 0 || th == 0 || self.cache.len() < (tw * th * 4) as usize {
+            return;
+        }
+        let [cx, cy] = self.center();
+        self.blit_rotated(rgba, w, h, ((1.0 - cx) * w as f32, cy * h as f32), (tw, th), -self.angle);
     }
 
     /// Alpha-blend the cached frame (`tw`x`th`) centered at `c` (pixels), rotated by `angle`.
@@ -961,9 +971,9 @@ enum CatAction {
     New(Option<library::Item>),
     Rename(String),
     Delete(String),
-    /// Delete one effect (own file → Recycle Bin; ManyCam effect → hidden).
+    /// Delete one effect (own file → Recycle Bin; built-in effect → hidden).
     DeleteItem(library::Item),
-    /// Bring back deleted ManyCam effects / original category names.
+    /// Bring back deleted built-in effects / original category names.
     Restore,
 }
 
@@ -1013,9 +1023,9 @@ fn effect_tile(ui: &mut egui::Ui, thumbs: &mut library::Thumbs, item: &library::
     if ui.is_rect_visible(rect) {
         let hovered = resp.hovered() && supported;
         let painter = ui.painter();
-        painter.rect_filled(rect, 8.0, if hovered { theme::CARD_HOVER } else { theme::CARD });
+        painter.rect_filled(rect, 8.0, if hovered { theme::card_hover() } else { theme::card_fill() });
         if hovered {
-            painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.5_f32, theme::ACCENT));
+            painter.rect_stroke(rect, 8.0, egui::Stroke::new(1.5_f32, theme::accent()));
         }
         let area = egui::Rect::from_min_size(rect.min + egui::vec2(6.0, 6.0), egui::vec2(w - 12.0, img_h - 6.0));
         match thumbs.get(item) {
@@ -1027,21 +1037,21 @@ fn effect_tile(ui: &mut egui::Ui, thumbs: &mut library::Thumbs, item: &library::
                 painter.image(t.id(), fit, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
             }
             None => {
-                painter.text(area.center(), egui::Align2::CENTER_CENTER, "…", egui::FontId::proportional(16.0), theme::TEXT_DIM);
+                painter.text(area.center(), egui::Align2::CENTER_CENTER, "…", egui::FontId::proportional(16.0), theme::text_dim());
             }
         }
         let mut job = egui::text::LayoutJob::simple_singleline(
             item.name().to_string(),
             egui::FontId::proportional(11.5),
-            if supported { theme::TEXT } else { theme::TEXT_DIM },
+            if supported { theme::text() } else { theme::text_dim() },
         );
         job.wrap = egui::text::TextWrapping { max_width: w - 10.0, max_rows: 1, break_anywhere: true, overflow_character: Some('…') };
         let galley = ui.fonts(|f| f.layout_job(job));
         let pos = egui::pos2(rect.center().x - galley.size().x / 2.0, rect.max.y - 19.0);
-        painter.galley(pos, galley, theme::TEXT);
+        painter.galley(pos, galley, theme::text());
         let badge = match item.kind() {
-            ovc_mcam::Kind::Animation => Some(("GIF", theme::ACCENT)),
-            ovc_mcam::Kind::FaceMask => Some(("FACE", theme::WARN)),
+            ovc_mcam::Kind::Animation => Some(("GIF", theme::accent())),
+            ovc_mcam::Kind::FaceMask => Some(("FACE", theme::warn())),
             _ => None,
         };
         if let Some((txt, col)) = badge {
@@ -1112,6 +1122,10 @@ struct Fx {
     smooth_lms: Option<Vec<[f32; 2]>>,
     work: Vec<u8>,
     work2: Vec<u8>,
+    /// Mirror on: the picture without placed layers and the name banner, and the mirrored
+    /// preview built from it (those drawn unflipped on top, so their text reads normally).
+    under: Vec<u8>,
+    mview: Vec<u8>,
     started: std::time::Instant,
     overlays: Vec<Overlay>,
     /// The Effect Maker's effect being built, shown on the face while the window is open.
@@ -1188,6 +1202,8 @@ impl Fx {
             smooth_lms: None,
             work: Vec::new(),
             work2: Vec::new(),
+            under: Vec::new(),
+            mview: Vec::new(),
             started: std::time::Instant::now(),
             overlays: Vec::new(),
             maker_preview: None,
@@ -1432,38 +1448,47 @@ impl Fx {
             a.render(&mut self.work, w, h, dt, self.anim_amount);
         }
 
+        // Preview only as often as the UI shows it (every frame in front, every 3rd in the
+        // background, never minimized).
+        let preview_due = self.preview_needed || (self.ui_every != 0 && (self.processed + 1) % self.ui_every as u64 == 0);
+        // Mirror on: the preview flips the camera, but placed layers (speech bubbles,
+        // letters…) and the name banner must still read normally. Keep the picture without
+        // them in `under` (face stickers drawn there too: they flip with the face).
+        let readable = preview_due
+            && self.mirror
+            && use_work
+            && (self.banner.is_some() || self.overlays.iter().any(|o| o.on && !o.follows_face()));
+        if readable {
+            self.under.clear();
+            self.under.extend_from_slice(&self.work);
+        }
+
         for ov in self.overlays.iter_mut().filter(|o| o.on) {
             let rgba = &mut self.work[..];
             if ov.anchor.is_some() {
                 // Face sticker (hat, glasses, beard…): placed relative to the eyes.
                 match landmarks.as_deref() {
-                    Some(lms) => ov.composite_face(rgba, w, h, lms),
+                    Some(lms) => {
+                        ov.composite_face(rgba, w, h, lms);
+                        if readable {
+                            ov.redraw_face(&mut self.under, w, h);
+                        }
+                    }
                     None => ov.drawn = None, // no face in view: hidden
                 }
                 continue;
             }
-            match &ov.face {
-                Some(pivots) => {
-                    // Face mask: warp the mask image onto the detected 68 landmarks.
-                    if let (Some(lms), Some(fr)) = (&landmarks, ov.frames.first()) {
-                        let dst: Vec<[f32; 2]> = lms.iter().map(|p| [p[0] * w as f32, p[1] * h as f32]).collect();
-                        ovc_ml::warp::warp_mask_onto(rgba, w, h, &fr.rgba, fr.w, fr.h, pivots, &dst, ov.opacity);
-                        let (mut x0, mut y0, mut x1, mut y1) = (1f32, 1f32, 0f32, 0f32);
-                        for p in lms {
-                            (x0, y0, x1, y1) = (x0.min(p[0]), y0.min(p[1]), x1.max(p[0]), y1.max(p[1]));
-                        }
-                        ov.drawn = Some([x0, y0, x1, y1]);
-                    } else {
-                        ov.drawn = None;
-                    }
-                }
-                None => ov.composite(rgba, w, h),
-            }
+            ov.composite(rgba, w, h);
         }
         // The Effect Maker's effect on the face, and the name banner on top of everything.
         if let Some(ov) = &mut self.maker_preview {
             match landmarks.as_deref() {
-                Some(lms) => ov.composite_face(&mut self.work, w, h, lms),
+                Some(lms) => {
+                    ov.composite_face(&mut self.work, w, h, lms);
+                    if readable {
+                        ov.redraw_face(&mut self.under, w, h);
+                    }
+                }
                 None => ov.drawn = None,
             }
         }
@@ -1487,14 +1512,30 @@ impl Fx {
         let t_vcam = std::time::Instant::now();
         self.vcam.frame(rgba, w, h);
 
-        // Preview: only as often as the UI shows it (every frame in front, every 3rd in
-        // the background, never minimized), and only as large as it is drawn.
+        // Preview: only when due (see `preview_due`), and only as large as it is drawn.
         let t_preview = std::time::Instant::now();
         self.processed += 1;
-        let due = self.ui_every != 0 && self.processed % self.ui_every as u64 == 0;
-        if due || self.preview_needed {
+        if preview_due {
             self.preview_needed = false;
-            self.preview = Some(preview_image(rgba, w, h, self.preview_px, self.mirror));
+            self.preview = Some(if readable {
+                // Mirrored camera, then the placed layers and the name unflipped on top.
+                let row = w as usize * 4;
+                self.mview.resize(self.under.len(), 0);
+                for (d, s) in self.mview.chunks_exact_mut(row).zip(self.under.chunks_exact(row)) {
+                    for (dp, sp) in d.chunks_exact_mut(4).zip(s.chunks_exact(4).rev()) {
+                        dp.copy_from_slice(sp);
+                    }
+                }
+                for ov in self.overlays.iter().filter(|o| o.on && !o.follows_face()) {
+                    ov.blit_mirrored(&mut self.mview, w, h);
+                }
+                if let Some(b) = &mut self.banner {
+                    b.draw(&mut self.mview, w, h);
+                }
+                preview_image(&self.mview, w, h, self.preview_px, false)
+            } else {
+                preview_image(rgba, w, h, self.preview_px, self.mirror)
+            });
             // A non-zero delay: egui paints a zero-delay request twice.
             ui.request_repaint_after(std::time::Duration::from_nanos(1));
         }
@@ -1524,7 +1565,7 @@ struct Studio {
     scrub: Option<f64>,
 
 
-    // Our re-creations of ManyCam's Filters / Distortions (CPU, see ovc_effects::cpu).
+    // Color filters / distortions (CPU, see ovc_effects::cpu).
 
     load_err: Option<String>,
 
@@ -1570,6 +1611,9 @@ struct Studio {
     // Performance options (Setup tab).
     /// Preview fps while MarkCam is behind another window (30 / 15 / 5 / 0).
     bg_preview_fps: u32,
+    /// The chosen theme, and the one the widgets are styled with now.
+    theme_id: String,
+    theme_shown: String,
     /// "Start with Windows" as last read from the registry.
     autostart: bool,
     /// Launched by the Windows Run entry: minimize on the first frame.
@@ -1639,7 +1683,6 @@ impl Studio {
     fn new(ctx: egui::Context) -> anyhow::Result<Self> {
         theme::apply(&ctx);
         let cfg = settings::load();
-        library::set_use_manycam(cfg.use_manycam && !PUBLIC);
         let fx = Arc::new(Mutex::new(Fx::new(GpuContext::new()?)));
         let mut s = Self {
             fx: fx.clone(),
@@ -1678,6 +1721,8 @@ impl Studio {
             last_download: None,
             download_dir: None,
             bg_preview_fps: 30,
+            theme_id: "midnight".into(),
+            theme_shown: "midnight".into(),
             autostart: autostart::enabled(),
             start_minimized: std::env::args().any(|a| a == autostart::MINIMIZED_FLAG),
             seg: None,
@@ -1685,7 +1730,7 @@ impl Studio {
             bg_files: None,
             bg_thumbs: std::collections::HashMap::new(),
             picking_key: false,
-            lib: library::Library::start(None),
+            lib: library::Library::start(),
             thumbs: library::Thumbs::start(),
             query: String::new(),
             category: None,
@@ -1830,6 +1875,7 @@ impl Studio {
         }
         self.category = c.category.clone();
         self.bg_preview_fps = c.preview_fps_behind;
+        self.theme_id = c.theme.clone();
         fx.idle_camera = c.idle_camera;
         fx.vbg.choice = vbg::Choice::from_id(&c.background);
         fx.vbg.blur = c.background_blur;
@@ -1962,7 +2008,7 @@ impl Studio {
                 }
                 let Some(url) = self.link_dialog.as_mut() else { return };
                 ui.label("Paste a link — YouTube, Twitch, Facebook, Vimeo… (live streams too).");
-                ui.label(egui::RichText::new("The picture goes to the MarkCam camera, the sound to MarkCam Microphone.").small().color(theme::TEXT_DIM));
+                ui.label(egui::RichText::new("The picture goes to the MarkCam camera, the sound to MarkCam Microphone.").small().color(theme::text_dim()));
                 let te = ui.add(egui::TextEdit::singleline(url).hint_text("https://www.youtube.com/watch?v=…").desired_width(420.0));
                 te.request_focus();
                 if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
@@ -1978,11 +2024,11 @@ impl Studio {
                 ui.label(
                     egui::RichText::new("360p starts fastest and is lightest on the laptop; 720p+ needs a good connection.")
                         .small()
-                        .color(theme::TEXT_DIM),
+                        .color(theme::text_dim()),
                 );
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("▶  Play").color(egui::Color32::WHITE)).fill(theme::ACCENT)).clicked() {
+                    if ui.add(egui::Button::new(egui::RichText::new("▶  Play").color(egui::Color32::WHITE)).fill(theme::accent())).clicked() {
                         play = true;
                     }
                     if ui
@@ -2085,7 +2131,7 @@ impl Studio {
                 }
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.add(egui::Button::new(egui::RichText::new("OK").color(egui::Color32::WHITE)).fill(theme::ACCENT)).clicked() {
+                    if ui.add(egui::Button::new(egui::RichText::new("OK").color(egui::Color32::WHITE)).fill(theme::accent())).clicked() {
                         ok = true;
                     }
                     if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -2205,6 +2251,7 @@ impl Studio {
             tab: self.tab.id().into(),
             category: self.category.clone(),
             preview_fps_behind: self.bg_preview_fps,
+            theme: self.theme_id.clone(),
             idle_camera: fx.idle_camera,
             download_dir: self.download_dir.clone(),
             background: fx.vbg.choice.id(),
@@ -2215,7 +2262,6 @@ impl Studio {
             key_similarity: fx.vbg.key_sim,
             key_smoothness: fx.vbg.key_smooth,
             key_ai: fx.vbg.key_ai,
-            use_manycam: library::use_manycam(),
             banners: self.banners.clone(),
             banner_sel: self.banner_sel,
         }
@@ -2238,6 +2284,37 @@ impl Studio {
     }
 
     /// Switch to a camera at the currently selected resolution/fps.
+    /// The capture resolutions, as menu items (top bar combo or the compact format menu).
+    fn res_items(&mut self, ui: &mut egui::Ui, res_list: &[(u32, u32)], modes: &[CamMode], pending: &mut Option<Spec>) {
+        for rc in res_list {
+            if ui.selectable_label(self.sel_res == *rc, format!("{}×{}", rc.0, rc.1)).clicked() {
+                self.sel_res = *rc;
+                let fl = fps_for(modes, *rc);
+                if !fl.contains(&self.sel_fps) {
+                    // Prefer <=60 so we don't jump to an exotic rate.
+                    self.sel_fps = *fl.iter().find(|f| **f <= 60).unwrap_or(&fl[0]);
+                }
+                if let Spec::Camera { idx, .. } = self.current {
+                    *pending = Some(self.open_camera(idx));
+                }
+                ui.close_menu();
+            }
+        }
+    }
+
+    /// The frame rates for the chosen resolution, as menu items.
+    fn fps_items(&mut self, ui: &mut egui::Ui, fps_list: &[u32], pending: &mut Option<Spec>) {
+        for f in fps_list {
+            if ui.selectable_label(self.sel_fps == *f, format!("{f} fps")).clicked() {
+                self.sel_fps = *f;
+                if let Spec::Camera { idx, .. } = self.current {
+                    *pending = Some(self.open_camera(idx));
+                }
+                ui.close_menu();
+            }
+        }
+    }
+
     fn open_camera(&mut self, idx: u32) -> Spec {
         Spec::Camera { idx, w: self.sel_res.0, h: self.sel_res.1, fps: self.sel_fps }
     }
@@ -2321,6 +2398,10 @@ impl Perf {
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         let t_update = std::time::Instant::now();
+        if self.theme_shown != self.theme_id {
+            theme::set(ctx, &self.theme_id);
+            self.theme_shown = self.theme_id.clone();
+        }
         self.escape_ladder(ctx);
         self.update_inner(ctx, frame);
         let cam_fps = *self.cap.cam_fps.lock().unwrap();
@@ -2436,7 +2517,6 @@ impl Studio {
         let mut do_import = false;
         let mut open_maker = false;
         let mut do_refresh = false;
-        let mut locate_folder = false;
         let mut pick_dl_dir = false;
         let mut add_backgrounds = false;
         let mut cat_action: Option<CatAction> = None;
@@ -2456,14 +2536,19 @@ impl Studio {
         }
 
         // ── Top bar: source, format, mirror · virtual-camera status ─────────────────────
+        // Narrower windows: the top bar gets more compact step by step instead of letting
+        // buttons run into each other (capture format → one small menu, shorter labels).
+        let win_w = ctx.screen_rect().width();
+        let compact = win_w < 1240.0;
+        let tight = win_w < 1100.0;
         egui::TopBottomPanel::top("topbar")
             .exact_height(50.0)
-            .frame(egui::Frame::none().fill(theme::BG).inner_margin(egui::Margin::symmetric(14.0, 0.0)))
+            .frame(egui::Frame::none().fill(theme::bg()).inner_margin(egui::Margin::symmetric(14.0, 0.0)))
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     theme::logo(ui);
                     ui.label(egui::RichText::new("MarkCam").strong().size(17.0));
-                    ui.add_space(18.0);
+                    ui.add_space(if compact { 8.0 } else { 18.0 });
 
                     let cur_name = match &self.current {
                         Spec::Test => "Test pattern".to_string(),
@@ -2481,10 +2566,10 @@ impl Studio {
                         Spec::Link(u, q) => format!("Link {q}p: {}", short_link(u)),
                     };
                     egui::ComboBox::from_id_salt("source")
-                        .width(230.0)
+                        .width(if tight { 150.0 } else if compact { 190.0 } else { 230.0 })
                         .selected_text(format!("📷  {cur_name}"))
                         .show_ui(ui, |ui| {
-                            ui.label(egui::RichText::new("CAMERAS").small().color(theme::TEXT_DIM));
+                            ui.label(egui::RichText::new("CAMERAS").small().color(theme::text_dim()));
                             for c in &cams {
                                 let on = matches!(self.current, Spec::Camera { idx, .. } if idx == c.index);
                                 if ui.selectable_label(on, &c.name).clicked() {
@@ -2492,7 +2577,7 @@ impl Studio {
                                 }
                             }
                             ui.separator();
-                            ui.label(egui::RichText::new("SCREEN").small().color(theme::TEXT_DIM));
+                            ui.label(egui::RichText::new("SCREEN").small().color(theme::text_dim()));
                             if ui.selectable_label(false, "Full screen").clicked() {
                                 source_action = Some(SourceAction::FullScreen);
                             }
@@ -2509,7 +2594,7 @@ impl Studio {
                                 }
                             }
                             ui.separator();
-                            ui.label(egui::RichText::new("VIDEO").small().color(theme::TEXT_DIM));
+                            ui.label(egui::RichText::new("VIDEO").small().color(theme::text_dim()));
                             if ui.selectable_label(false, "Play a video file…").clicked() {
                                 source_action = Some(SourceAction::PickVideo);
                             }
@@ -2536,48 +2621,31 @@ impl Studio {
                             source_action = Some(SourceAction::PickArea);
                         }
                         if ui
-                            .add(egui::Button::new(egui::RichText::new("Back to camera").color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                            .add(egui::Button::new(egui::RichText::new("Back to camera").color(egui::Color32::WHITE)).fill(theme::accent()))
                             .clicked()
                         {
                             source_action = Some(SourceAction::BackToCamera);
                         }
                     }
 
-                    if is_cam {
-                    egui::ComboBox::from_id_salt("res")
-                        .width(104.0)
-                        .selected_text(format!("{}×{}", self.sel_res.0, self.sel_res.1))
-                        .show_ui(ui, |ui| {
-                            for rc in &res_list {
-                                if ui.selectable_label(self.sel_res == *rc, format!("{}×{}", rc.0, rc.1)).clicked() {
-                                    self.sel_res = *rc;
-                                    let fl = fps_for(&modes, *rc);
-                                    if !fl.contains(&self.sel_fps) {
-                                        // Prefer <=60 so we don't jump to an exotic rate.
-                                        self.sel_fps = *fl.iter().find(|f| **f <= 60).unwrap_or(&fl[0]);
-                                    }
-                                    if let Spec::Camera { idx, .. } = self.current {
-                                        pending = Some(self.open_camera(idx));
-                                    }
-                                }
-                            }
+                    if is_cam && !tight {
+                        egui::ComboBox::from_id_salt("res")
+                            .width(104.0)
+                            .selected_text(format!("{}×{}", self.sel_res.0, self.sel_res.1))
+                            .show_ui(ui, |ui| self.res_items(ui, &res_list, &modes, &mut pending))
+                            .response
+                            .on_hover_text("Capture resolution — 1280×720 is all ClassIn uses and saves battery");
+                        egui::ComboBox::from_id_salt("fps")
+                            .width(78.0)
+                            .selected_text(format!("{} fps", self.sel_fps))
+                            .show_ui(ui, |ui| self.fps_items(ui, &fps_list, &mut pending));
+                    } else if is_cam {
+                        ui.menu_button(format!("{}p · {}", self.sel_res.1, self.sel_fps), |ui| {
+                            ui.menu_button(format!("Resolution: {}×{}", self.sel_res.0, self.sel_res.1), |ui| self.res_items(ui, &res_list, &modes, &mut pending));
+                            ui.menu_button(format!("Frame rate: {} fps", self.sel_fps), |ui| self.fps_items(ui, &fps_list, &mut pending));
                         })
                         .response
-                        .on_hover_text("Capture resolution — 1280×720 is all ClassIn uses and saves battery");
-
-                    egui::ComboBox::from_id_salt("fps")
-                        .width(78.0)
-                        .selected_text(format!("{} fps", self.sel_fps))
-                        .show_ui(ui, |ui| {
-                            for f in &fps_list {
-                                if ui.selectable_label(self.sel_fps == *f, format!("{f} fps")).clicked() {
-                                    self.sel_fps = *f;
-                                    if let Spec::Camera { idx, .. } = self.current {
-                                        pending = Some(self.open_camera(idx));
-                                    }
-                                }
-                            }
-                        });
+                        .on_hover_text(format!("Camera format: {}×{} · {} fps", self.sel_res.0, self.sel_res.1, self.sel_fps));
                     }
 
                     if ui
@@ -2595,7 +2663,7 @@ impl Studio {
                     };
                     let mut freeze_btn = egui::Button::new(freeze_label).selected(self.frozen);
                     if self.frozen {
-                        freeze_btn = freeze_btn.fill(theme::WARN);
+                        freeze_btn = freeze_btn.fill(theme::warn());
                     }
                     if ui
                         .add(freeze_btn)
@@ -2623,10 +2691,10 @@ impl Studio {
                     // Right side: virtual camera.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if self.vcam_installing.is_some() {
-                            theme::pill(ui, &format!("Installing… confirm the {ADMIN_PROMPT}"), theme::WARN);
+                            theme::pill(ui, &format!("Installing… confirm the {ADMIN_PROMPT}"), theme::warn());
                         } else if self.vcam_state == vcam::InstallState::Missing {
                             if ui
-                                .add(egui::Button::new(egui::RichText::new("Install virtual camera").color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                                .add(egui::Button::new(egui::RichText::new("Install virtual camera").color(egui::Color32::WHITE)).fill(theme::accent()))
                                 .on_hover_text("One-time, needs admin: makes \"MarkCam\" appear as a camera in ClassIn / Zoom")
                                 .clicked()
                             {
@@ -2634,11 +2702,11 @@ impl Studio {
                             }
                         } else {
                             let resp = match (fx.vcam.on, fx.vcam.consumer()) {
-                                (false, _) => theme::pill(ui, "MarkCam  off", theme::TEXT_DIM)
+                                (false, _) => theme::pill(ui, if compact { "Off" } else { "MarkCam  off" }, theme::text_dim())
                                     .on_hover_text("Virtual camera is off — apps see a dark picture. Click to turn on."),
-                                (true, Some((cw, ch))) => theme::pill(ui, &format!("●  LIVE  {cw}×{ch}"), theme::LIVE)
+                                (true, Some((cw, ch))) => theme::pill(ui, &if compact { "●  LIVE".to_string() } else { format!("●  LIVE  {cw}×{ch}") }, theme::live())
                                     .on_hover_text("An app (ClassIn…) is showing the MarkCam camera. Click to turn off."),
-                                (true, None) => theme::pill(ui, "MarkCam  ready", theme::ACCENT)
+                                (true, None) => theme::pill(ui, if compact { "Ready" } else { "MarkCam  ready" }, theme::accent())
                                     .on_hover_text("Pick \"MarkCam\" as the camera in ClassIn / Zoom. Click to turn off."),
                             };
                             if resp.clicked() {
@@ -2647,16 +2715,22 @@ impl Studio {
                             // A newer MarkCam on GitHub: one click to its download page.
                             if let Some(v) = NEWER_VERSION.lock().unwrap().clone() {
                                 if ui
-                                    .add(egui::Button::new(egui::RichText::new(format!("⬆ MarkCam {v} is out")).color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                                    .add(egui::Button::new(egui::RichText::new(if compact { format!("⬆ {v}") } else { format!("⬆ MarkCam {v} is out") }).color(egui::Color32::WHITE)).fill(theme::accent()))
                                     .on_hover_text("Opens the download page. Install it after your class: installing restarts the camera.")
                                     .clicked()
                                 {
                                     ui.ctx().open_url(egui::OpenUrl::new_tab(RELEASES_URL));
                                 }
                             }
-                            // About / support, always in sight next to the camera status.
+                            // About / support, always in sight next to the camera status (rose,
+                            // light or dark to suit the theme).
+                            let (heart, heart_bg) = if theme::current().light {
+                                (egui::Color32::from_rgb(196, 40, 92), egui::Color32::from_rgb(255, 224, 234))
+                            } else {
+                                (egui::Color32::from_rgb(255, 170, 190), egui::Color32::from_rgb(58, 34, 46))
+                            };
                             if ui
-                                .add(egui::Button::new(egui::RichText::new("♥ About MarkCam · Support").color(egui::Color32::from_rgb(255, 170, 190))).fill(egui::Color32::from_rgb(58, 34, 46)))
+                                .add(egui::Button::new(egui::RichText::new(if compact { "♥" } else { "♥ About MarkCam · Support" }).color(heart)).fill(heart_bg))
                                 .on_hover_text("Who made MarkCam, credits — and buy the author a coffee")
                                 .clicked()
                             {
@@ -2664,7 +2738,7 @@ impl Studio {
                             }
                             if vcam::needs_update(self.vcam_state, &fx.vcam)
                                 && ui
-                                    .add(egui::Button::new(egui::RichText::new(vcam::UPDATE_LABEL).color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                                    .add(egui::Button::new(egui::RichText::new(vcam::UPDATE_LABEL).color(egui::Color32::WHITE)).fill(theme::accent()))
                                     .on_hover_text(vcam::UPDATE_HINT)
                                     .clicked()
                             {
@@ -2676,7 +2750,7 @@ impl Studio {
                                 let idx = *idx;
                                 if (cw as u64 * ch as u64) < (fx.w as u64 * fx.h as u64) && res_list.contains(&(cw, ch)) {
                                     if ui
-                                        .add(egui::Button::new(egui::RichText::new(format!("Use {cw}×{ch}")).color(theme::WARN)))
+                                        .add(egui::Button::new(egui::RichText::new(format!("Use {cw}×{ch}")).color(theme::warn())))
                                         .on_hover_text(format!(
                                             "The app only uses {cw}×{ch}; capturing {}×{} wastes CPU and battery.",
                                             fx.w, fx.h
@@ -2696,19 +2770,19 @@ impl Studio {
         // ── Status bar ─────────────────────────────────────────────────────────────────
         egui::TopBottomPanel::bottom("status")
             .exact_height(26.0)
-            .frame(egui::Frame::none().fill(theme::BG).inner_margin(egui::Margin::symmetric(14.0, 0.0)))
+            .frame(egui::Frame::none().fill(theme::bg()).inner_margin(egui::Margin::symmetric(14.0, 0.0)))
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     let neg = status
                         .as_ref()
                         .map(|s| format!("{}×{}", s.negotiated.width, s.negotiated.height))
                         .unwrap_or_else(|| "—".into());
-                    let dim = |t: String| egui::RichText::new(t).small().color(theme::TEXT_DIM);
+                    let dim = |t: String| egui::RichText::new(t).small().color(theme::text_dim());
                     // The new source is still starting (a link takes a few seconds to resolve).
                     if status.is_none() && err.is_none() && !matches!(self.current, Spec::Test) {
                         spinner(ui);
                         let what = if matches!(self.current, Spec::Link(..)) { "Opening the link…" } else { "Opening…" };
-                        ui.label(egui::RichText::new(what).small().color(theme::ACCENT));
+                        ui.label(egui::RichText::new(what).small().color(theme::accent()));
                     }
                     if fx.camera_idle {
                         ui.label(dim("Camera resting — nothing is showing the picture".into()))
@@ -2720,7 +2794,7 @@ impl Studio {
                     ui.label(dim(fx.gpu.adapter_info.to_string()));
                     let problem = err.clone().or_else(|| self.load_err.clone()).or_else(|| fx.vcam.err.clone());
                     if let Some(e) = problem {
-                        ui.label(egui::RichText::new(format!("⚠ {e}")).small().color(theme::ERROR));
+                        ui.label(egui::RichText::new(format!("⚠ {e}")).small().color(theme::error()));
                     }
                 });
             });
@@ -2729,13 +2803,14 @@ impl Studio {
         egui::SidePanel::right("side")
             .resizable(true)
             .default_width(392.0)
-            .width_range(300.0..=600.0)
-            .frame(egui::Frame::none().fill(theme::PANEL).inner_margin(egui::Margin::same(12.0)))
+            .width_range(300.0..=(win_w * 0.45).clamp(300.0, 600.0))
+            .frame(egui::Frame::none().fill(theme::panel()).inner_margin(egui::Margin::same(12.0)))
             .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
+                // The tabs stay in one row; the ones that don't fit go into a menu at its
+                // end, under "More" (the open tab always stays in the row).
+                {
                     let n = fx.overlays.len();
-                    for (tab, label) in [
+                    let tabs = [
                         (Tab::Effects, "Effects".to_string()),
                         (Tab::Layers, if n > 0 { format!("Layers ({n})") } else { "Layers".into() }),
                         (Tab::Background, "Background".to_string()),
@@ -2743,65 +2818,121 @@ impl Studio {
                         (Tab::Adjust, "Adjust".to_string()),
                         (Tab::Audio, "Audio".to_string()),
                         (Tab::Setup, "Setup".to_string()),
-                    ] {
-                        ui.selectable_value(&mut self.tab, tab, label);
+                    ];
+                    let gap = 4.0;
+                    let pad = ui.spacing().button_padding.x * 2.0;
+                    let width_of = |t: &str| ui.fonts(|f| f.layout_no_wrap(t.to_owned(), egui::TextStyle::Button.resolve(ui.style()), theme::text()).size().x) + pad;
+                    let avail = ui.available_width();
+                    let total: f32 = tabs.iter().map(|(_, l)| width_of(l) + gap).sum();
+                    let mut shown: Vec<usize> = (0..tabs.len()).collect();
+                    let mut more: Vec<usize> = Vec::new();
+                    if total > avail {
+                        let room = avail - width_of("More") - gap;
+                        let mut used = 0.0;
+                        shown.clear();
+                        for (i, (_, l)) in tabs.iter().enumerate() {
+                            let w = width_of(l) + gap;
+                            if more.is_empty() && used + w <= room {
+                                shown.push(i);
+                                used += w;
+                            } else {
+                                more.push(i);
+                            }
+                        }
+                        // The open tab is in the menu: it takes the last place in the row.
+                        if let Some(k) = more.iter().position(|&i| tabs[i].0 == self.tab) {
+                            let open = more.remove(k);
+                            while !shown.is_empty() && used + width_of(&tabs[open].1) + gap > room {
+                                let last = shown.pop().unwrap();
+                                used -= width_of(&tabs[last].1) + gap;
+                                more.insert(0, last);
+                            }
+                            shown.push(open);
+                            more.sort();
+                        }
                     }
-                });
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for &i in &shown {
+                            ui.selectable_value(&mut self.tab, tabs[i].0, tabs[i].1.as_str());
+                        }
+                        if !more.is_empty() {
+                            ui.menu_button("More", |ui| {
+                                for &i in &more {
+                                    if ui.selectable_label(self.tab == tabs[i].0, tabs[i].1.as_str()).clicked() {
+                                        self.tab = tabs[i].0;
+                                        ui.close_menu();
+                                    }
+                                }
+                            })
+                            .response
+                            .on_hover_text(more.iter().map(|&i| tabs[i].1.as_str()).collect::<Vec<_>>().join(" · "));
+                        }
+                    });
+                }
                 ui.separator();
 
                 match self.tab {
                     Tab::Banner => self.banner_panel(ui, ctx, fx),
                     Tab::Effects => {
                         // What is on the picture now, pinned under the effect grid: click one to
-                        // select it on the preview, × to take it off (Layers has the details).
+                        // select it on the preview, the eye to hide it for later, × to take it
+                        // off (Layers has the details).
                         if !fx.overlays.is_empty() {
                             let mut select: Option<usize> = None;
                             let mut remove: Option<usize> = None;
+                            let mut toggle: Option<usize> = None;
                             let mut to_layers = false;
                             egui::TopBottomPanel::bottom("on-the-picture")
-                                .frame(egui::Frame::none().fill(theme::PANEL).inner_margin(egui::Margin { left: 0.0, right: 0.0, top: 6.0, bottom: 0.0 }))
+                                .frame(egui::Frame::none().fill(theme::panel()).inner_margin(egui::Margin { left: 0.0, right: 0.0, top: 6.0, bottom: 2.0 }))
                                 .show_inside(ui, |ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("On the picture").small().strong());
+                                        let shown = fx.overlays.iter().filter(|o| o.on).count();
+                                        let hidden = fx.overlays.len() - shown;
+                                        theme::section(ui, &if hidden > 0 { format!("On the picture · {shown} shown, {hidden} hidden") } else { format!("On the picture · {shown}") });
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             if ui.small_button("Edit…").on_hover_text("Size, opacity, order: the Layers tab").clicked() {
                                                 to_layers = true;
                                             }
                                         });
                                     });
-                                    egui::ScrollArea::vertical().max_height(74.0).auto_shrink([false, true]).show(ui, |ui| {
-                                        ui.horizontal_wrapped(|ui| {
+                                    egui::ScrollArea::horizontal().id_salt("on-the-picture-row").auto_shrink([false, true]).show(ui, |ui| {
+                                        // The mouse wheel scrolls the row sideways (a wheel only goes up/down).
+                                        if ui.rect_contains_pointer(ui.clip_rect()) {
+                                            ui.ctx().input_mut(|i| {
+                                                if i.smooth_scroll_delta.x == 0.0 {
+                                                    i.smooth_scroll_delta.x = i.smooth_scroll_delta.y;
+                                                    i.smooth_scroll_delta.y = 0.0;
+                                                }
+                                            });
+                                        }
+                                        ui.horizontal(|ui| {
+                                            ui.spacing_mut().item_spacing.x = 6.0;
                                             for (i, ov) in fx.overlays.iter().enumerate() {
-                                                let is_sel = self.selected == Some(i);
-                                                egui::Frame::none()
-                                                    .fill(if is_sel { theme::CARD_HOVER } else { theme::CARD })
-                                                    .stroke(if is_sel { egui::Stroke::new(1.0_f32, theme::ACCENT) } else { egui::Stroke::NONE })
-                                                    .rounding(6.0)
-                                                    .inner_margin(egui::Margin::symmetric(4.0, 2.0))
-                                                    .show(ui, |ui| {
-                                                        ui.horizontal(|ui| {
-                                                            ui.spacing_mut().item_spacing.x = 4.0;
-                                                            let src = ov.source.clone();
-                                                            let thumb = ov.thumb_key.as_deref().and_then(|k| {
-                                                                self.thumbs.get_for(k, || src.as_ref().and_then(library::effect_ref_of))
-                                                            });
-                                                            if let Some(t) = thumb {
-                                                                ui.add(egui::Image::new((t.id(), egui::vec2(24.0, 18.0))).rounding(3.0));
-                                                            }
-                                                            let name: String = ov.name.chars().take(14).collect();
-                                                            let color = if ov.on { theme::TEXT } else { theme::TEXT_DIM };
-                                                            if ui.add(egui::Label::new(egui::RichText::new(name).small().color(color)).sense(egui::Sense::click())).on_hover_text(&ov.name).clicked() {
-                                                                select = Some(i);
-                                                            }
-                                                            if ui.small_button("×").on_hover_text("Remove").clicked() {
-                                                                remove = Some(i);
-                                                            }
-                                                        });
-                                                    });
+                                                let src = ov.source.clone();
+                                                let thumb = ov
+                                                    .thumb_key
+                                                    .as_deref()
+                                                    .and_then(|k| self.thumbs.get_for(k, || src.as_ref().and_then(library::effect_ref_of)))
+                                                    .map(|t| (t.id(), t.size_vec2()));
+                                                let c = theme::layer_tile(ui, egui::Id::new(("layer-tile", i)), thumb, &ov.name, ov.on, self.selected == Some(i));
+                                                if c.select {
+                                                    select = Some(i);
+                                                }
+                                                if c.toggle {
+                                                    toggle = Some(i);
+                                                }
+                                                if c.remove {
+                                                    remove = Some(i);
+                                                }
                                             }
                                         });
                                     });
+                                    ui.add_space(4.0);
                                 });
+                            if let Some(i) = toggle {
+                                fx.overlays[i].on = !fx.overlays[i].on;
+                            }
                             if let Some(i) = select {
                                 self.selected = Some(i);
                             }
@@ -2820,7 +2951,7 @@ impl Studio {
                             // inside a one-row strip so the layout doesn't claim the whole panel.
                             let row = egui::vec2(ui.available_width(), 30.0);
                             ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button("Import").on_hover_text(if PUBLIC { "Import a shared MarkCam effect (.markcam)" } else { "Import a MarkCam .markcam or a ManyCam .mcv / .mcep file" }).clicked() {
+                                if ui.button("Import").on_hover_text("Import a shared MarkCam effect (.markcam)").clicked() {
                                     do_import = true;
                                 }
                                 if ui.button("+").on_hover_text("Add your own images or animations (PNG, JPG, GIF, WebP, APNG) — or drag files onto the window").clicked() {
@@ -2886,7 +3017,7 @@ impl Studio {
                                         ui.label(
                                             egui::RichText::new("Right-click an effect to move or delete it.")
                                                 .small()
-                                                .color(theme::TEXT_DIM),
+                                                .color(theme::text_dim()),
                                         );
                                     }
                                     // Where effects can be moved: your categories first, then the rest.
@@ -2906,7 +3037,6 @@ impl Studio {
                                                     let ok = match it.kind() {
                                                         ovc_mcam::Kind::Object | ovc_mcam::Kind::Animation => true,
                                                         ovc_mcam::Kind::FaceMask => have_face_models,
-                                                        ovc_mcam::Kind::Other | ovc_mcam::Kind::Locked => false,
                                                     };
                                                     let moved = self.lib.is_moved(it);
                                                     let here = self.lib.category_of(it).to_string();
@@ -2940,7 +3070,7 @@ impl Studio {
                                                         }
                                                         ui.separator();
                                                         let own = it.category == library::MY_EFFECTS;
-                                                        let del = ui.button(egui::RichText::new("🗑  Delete effect").color(theme::ERROR)).on_hover_text(if own {
+                                                        let del = ui.button(egui::RichText::new("🗑  Delete effect").color(theme::error())).on_hover_text(if own {
                                                             "Your file goes to the Recycle Bin"
                                                         } else {
                                                             "Removed from MarkCam (restore any time: “Restore deleted effects” at the bottom of the category list)"
@@ -2954,7 +3084,7 @@ impl Studio {
                                             });
                                         }
                                         if items.is_empty() {
-                                            ui.label(egui::RichText::new("Nothing found.").color(theme::TEXT_DIM));
+                                            ui.label(egui::RichText::new("Nothing found.").color(theme::text_dim()));
                                         }
                                     });
                                 }
@@ -2962,14 +3092,14 @@ impl Studio {
                                     if self.lib.scanning() {
                                         ui.horizontal(|ui| {
                                             spinner(ui);
-                                            ui.label(egui::RichText::new("Indexing effects…").color(theme::TEXT_DIM));
+                                            ui.label(egui::RichText::new("Indexing effects…").color(theme::text_dim()));
                                         });
                                     }
                                     let cats: Vec<(String, usize)> = self.lib.categories().to_vec();
                                     let own_cats = self.lib.own_categories();
                                     ui.add_space(2.0);
                                     ui.columns(2, |c| {
-                                        let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(14.5)).min_size(egui::vec2(0.0, 38.0)).fill(theme::ACCENT_DIM);
+                                        let big = |t: &str| egui::Button::new(egui::RichText::new(t).strong().size(14.5)).min_size(egui::vec2(0.0, 38.0)).fill(theme::accent_dim());
                                         if c[0].add_sized([c[0].available_width(), 38.0], big("🎨 Make your own effect")).on_hover_text("Effect Maker: build a face effect from emoji, pictures or photos, animate it, save it").clicked() {
                                             open_maker = true;
                                         }
@@ -3046,20 +3176,19 @@ impl Studio {
                                                 ui.label(
                                                     egui::RichText::new("Make your own categories, then right-click effects to move them in.")
                                                         .small()
-                                                        .color(theme::TEXT_DIM),
+                                                        .color(theme::text_dim()),
                                                 );
                                             }
                                         });
                                         ui.add_space(6.0);
-                                        // Everything else: ManyCam's (when turned on in Setup) and imports.
+                                        // Everything else (categories no longer shipped, effects moved there).
                                         let others: Vec<&(String, usize)> = cats
                                             .iter()
                                             .filter(|(n, c)| n != library::MY_EFFECTS && !user_cats.contains(n) && !own_cats.contains(n) && *c > 0)
                                             .collect();
-                                        if !others.is_empty() || library::use_manycam() {
+                                        if !others.is_empty() {
                                             let n: usize = others.iter().map(|c| c.1).sum();
-                                            let title = if library::use_manycam() { "ManyCam categories" } else { "Imported" };
-                                            theme::section(ui, &format!("{title} · {n} effects"));
+                                            theme::section(ui, &format!("Other · {n} effects"));
                                         }
                                         ui.scope(|ui| {
                                             ui.spacing_mut().item_spacing.y = 0.0;
@@ -3073,7 +3202,7 @@ impl Studio {
                                                         cat_action = Some(CatAction::Rename(name.clone()));
                                                         ui.close_menu();
                                                     }
-                                                    if ui.button(egui::RichText::new("🗑  Delete category").color(theme::ERROR)).clicked() {
+                                                    if ui.button(egui::RichText::new("🗑  Delete category").color(theme::error())).clicked() {
                                                         cat_action = Some(CatAction::Delete(name.clone()));
                                                         ui.close_menu();
                                                     }
@@ -3084,7 +3213,7 @@ impl Studio {
                                                 ui.add_space(8.0);
                                                 if ui
                                                     .small_button(format!("↺ Restore deleted effects ({deleted})"))
-                                                    .on_hover_text("Bring back ManyCam effects / categories you deleted, and their original names")
+                                                    .on_hover_text("Bring back built-in effects / categories you deleted, and their original names")
                                                     .clicked()
                                                 {
                                                     cat_action = Some(CatAction::Restore);
@@ -3111,7 +3240,7 @@ impl Studio {
                                          their real outline.",
                                     )
                                     .small()
-                                    .color(theme::TEXT_DIM),
+                                    .color(theme::text_dim()),
                                 );
                                 ui.horizontal(|ui| {
                                     ui.label("Find me by");
@@ -3127,10 +3256,10 @@ impl Studio {
                                         for &[r, g, b] in &fx.vbg.keys {
                                             let (sw, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
                                             ui.painter().rect_filled(sw, 3.0, egui::Color32::from_rgb(r, g, b));
-                                            ui.painter().rect_stroke(sw, 3.0, egui::Stroke::new(1.0f32, theme::TEXT_DIM));
+                                            ui.painter().rect_stroke(sw, 3.0, egui::Stroke::new(1.0f32, theme::text_dim()));
                                         }
                                         if fx.vbg.keys.is_empty() {
-                                            ui.label(egui::RichText::new("No colors picked yet").small().color(theme::TEXT_DIM));
+                                            ui.label(egui::RichText::new("No colors picked yet").small().color(theme::text_dim()));
                                         }
                                     });
                                     ui.horizontal_wrapped(|ui| {
@@ -3155,14 +3284,14 @@ impl Studio {
                                         }
                                     });
                                     if self.picking_key {
-                                        ui.label(egui::RichText::new("Click on the wall in the picture. Each click adds a shade.").small().strong().color(theme::ACCENT));
+                                        ui.label(egui::RichText::new("Click on the wall in the picture. Each click adds a shade.").small().strong().color(theme::accent()));
                                     }
                                     ui.add(egui::Slider::new(&mut fx.vbg.key_sim, 0.0..=0.45).text("Similarity").show_value(false))
                                         .on_hover_text("How close to the picked color still counts as background. Raise it until the wall is gone.");
                                     ui.add(egui::Slider::new(&mut fx.vbg.key_smooth, 0.0..=0.3).text("Edge softness").show_value(false))
                                         .on_hover_text("Width of the soft edge around you.");
                                     if !fx.vbg.keys.is_empty() && fx.vbg.keyed_share > 0.75 && !fx.vbg.key_ai {
-                                        ui.label(egui::RichText::new("⚠ Almost the whole picture is removed: lower Similarity, Undo the last pick, or turn on AI helps.").small().color(theme::WARN));
+                                        ui.label(egui::RichText::new("⚠ Almost the whole picture is removed: lower Similarity, Undo the last pick, or turn on AI helps.").small().color(theme::warn()));
                                     }
                                     ui.checkbox(&mut fx.vbg.key_ai, "AI helps")
                                         .on_hover_text("Keeps you solid even where your clothes match the wall, and removes everything outside you (past the edge of the screen). Uses the graphics chip.");
@@ -3190,9 +3319,9 @@ impl Studio {
                                 });
                                 if let (true, Some(sw)) = (fx.vbg.active(), &self.seg) {
                                     let st = sw.status.lock().unwrap().clone();
-                                    ui.label(egui::RichText::new(format!("Person detection {st}")).small().color(theme::TEXT_DIM));
+                                    ui.label(egui::RichText::new(format!("Person detection {st}")).small().color(theme::text_dim()));
                                     if vbg::vc_runtime_missing() {
-                                        ui.label(egui::RichText::new("The virtual background needs Microsoft's free Visual C++ Runtime. Download it, run it, then restart MarkCam.").small().color(theme::WARN));
+                                        ui.label(egui::RichText::new("The virtual background needs Microsoft's free Visual C++ Runtime. Download it, run it, then restart MarkCam.").small().color(theme::warn()));
                                         if ui.button("⬇ Get the Visual C++ Runtime (Microsoft)").clicked() {
                                             ui.ctx().open_url(egui::OpenUrl::new_tab(vbg::VC_RUNTIME_URL));
                                         }
@@ -3204,7 +3333,7 @@ impl Studio {
                             });
                             ui.add_space(6.0);
                             let tile = egui::vec2(108.0, 61.0);
-                            let selected_stroke = egui::Stroke::new(2.5f32, theme::ACCENT);
+                            let selected_stroke = egui::Stroke::new(2.5f32, theme::accent());
                             theme::section(ui, "MarkCam");
                             ui.horizontal_wrapped(|ui| {
                                 for (i, name) in vbg::BUILTIN.iter().enumerate() {
@@ -3286,7 +3415,7 @@ impl Studio {
                     Tab::Layers => {
                         if fx.overlays.is_empty() {
                             ui.add_space(8.0);
-                            ui.label(egui::RichText::new("No effects on the picture yet.").color(theme::TEXT_DIM));
+                            ui.label(egui::RichText::new("No effects on the picture yet.").color(theme::text_dim()));
                             if ui.button("Browse effects").clicked() {
                                 self.tab = Tab::Effects;
                             }
@@ -3294,7 +3423,7 @@ impl Studio {
                             ui.label(
                                 egui::RichText::new("On the preview: click to select, drag to move, scroll or corner handle to resize, × or Delete to remove")
                                     .small()
-                                    .color(theme::TEXT_DIM),
+                                    .color(theme::text_dim()),
                             );
                             ui.add_space(4.0);
                         }
@@ -3306,11 +3435,11 @@ impl Studio {
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                             for (i, ov) in fx.overlays.iter_mut().enumerate() {
                                 let is_sel = sel == Some(i);
-                                let fill = if is_sel { theme::CARD_HOVER } else { theme::CARD };
+                                let fill = if is_sel { theme::card_hover() } else { theme::card_fill() };
                                 egui::Frame::none()
                                     .fill(fill)
                                     .rounding(8.0)
-                                    .stroke(if is_sel { egui::Stroke::new(1.0_f32, theme::ACCENT) } else { egui::Stroke::NONE })
+                                    .stroke(if is_sel { egui::Stroke::new(1.0_f32, theme::accent()) } else { egui::Stroke::NONE })
                                     .inner_margin(egui::Margin::same(8.0))
                                     .show(ui, |ui| {
                                         ui.set_width(ui.available_width());
@@ -3323,7 +3452,7 @@ impl Studio {
                                             if let Some(t) = thumb {
                                                 ui.add(egui::Image::new((t.id(), egui::vec2(36.0, 27.0))).rounding(4.0));
                                             }
-                                            let name = egui::RichText::new(&ov.name).color(if ov.on { theme::TEXT } else { theme::TEXT_DIM });
+                                            let name = egui::RichText::new(&ov.name).color(if ov.on { theme::text() } else { theme::text_dim() });
                                             if ui.add(egui::Label::new(name).truncate().sense(egui::Sense::click())).clicked() {
                                                 select = Some(i);
                                             }
@@ -3394,7 +3523,7 @@ impl Studio {
                                     fx.boost_on = on;
                                     fx.boost.reset();
                                 }
-                                ui.label(egui::RichText::new("Makes a weak or laptop webcam look better: light and color are corrected automatically and the grain is calmed.").small().color(theme::TEXT_DIM));
+                                ui.label(egui::RichText::new("Makes a weak or laptop webcam look better: light and color are corrected automatically and the grain is calmed.").small().color(theme::text_dim()));
                             });
                             ui.add_space(6.0);
                             for (title, weather) in [("Weather", true), ("Animated", false)] {
@@ -3447,14 +3576,14 @@ impl Studio {
                                             ui.label(
                                                 egui::RichText::new("Download the face models (Setup) to make it follow your face.")
                                                     .small()
-                                                    .color(theme::TEXT_DIM),
+                                                    .color(theme::text_dim()),
                                             );
                                         }
                                         if !fx.warp_follow_face {
                                             ui.label(
                                                 egui::RichText::new("Drag on the preview to move the center.")
                                                     .small()
-                                                    .color(theme::TEXT_DIM),
+                                                    .color(theme::text_dim()),
                                             );
                                         }
                                     }
@@ -3527,7 +3656,7 @@ impl Studio {
                             let not_camera = matches!(self.current, Spec::Link(..) | Spec::Media(_) | Spec::Screen(_));
                             theme::section(ui, "Play as the picture");
                             theme::card(ui, |ui| {
-                                ui.label(egui::RichText::new("Instead of your camera, the students see:").small().color(theme::TEXT_DIM));
+                                ui.label(egui::RichText::new("Instead of your camera, the students see:").small().color(theme::text_dim()));
                                 let w = (ui.available_width() - 6.0) / 2.0;
                                 ui.horizontal(|ui| {
                                     if ui.add_sized([w, 34.0], egui::Button::new("🎞  Video file…")).on_hover_text("A video from this computer, with sound").clicked() {
@@ -3563,7 +3692,7 @@ impl Studio {
                                     if ui
                                         .add_sized(
                                             [ui.available_width(), 32.0],
-                                            egui::Button::new(egui::RichText::new("📷  Back to camera").color(egui::Color32::WHITE)).fill(theme::ACCENT),
+                                            egui::Button::new(egui::RichText::new("📷  Back to camera").color(egui::Color32::WHITE)).fill(theme::accent()),
                                         )
                                         .clicked()
                                     {
@@ -3618,7 +3747,7 @@ impl Studio {
                                 ui.label(
                                     egui::RichText::new("Green-screen video? Select it, then Layers → Remove green background.")
                                         .small()
-                                        .color(theme::TEXT_DIM),
+                                        .color(theme::text_dim()),
                                 );
                             });
                             ui.add_space(6.0);
@@ -3626,7 +3755,7 @@ impl Studio {
                             theme::card(ui, |ui| {
                                 let mut play: Option<Spec> = None;
                                 if self.recent_media.is_empty() {
-                                    ui.label(egui::RichText::new("Videos and links you play show up here.").small().color(theme::TEXT_DIM));
+                                    ui.label(egui::RichText::new("Videos and links you play show up here.").small().color(theme::text_dim()));
                                 }
                                 for r in &self.recent_media {
                                     let (icon, label, spec) = if let Some(u) = r.strip_prefix("link:") {
@@ -3664,7 +3793,7 @@ impl Studio {
                                     }
                                 }
                                 ui.add_space(4.0);
-                                ui.label(egui::RichText::new(format!("Downloads go to {}", dir.display())).small().color(theme::TEXT_DIM));
+                                ui.label(egui::RichText::new(format!("Downloads go to {}", dir.display())).small().color(theme::text_dim()));
                                 ui.horizontal(|ui| {
                                     if ui.small_button("Open folder").clicked() {
                                         let _ = std::fs::create_dir_all(&dir);
@@ -3708,10 +3837,10 @@ impl Studio {
                                                     audio::SETUP_NOTE,
                                                 )
                                                 .small()
-                                                .color(theme::TEXT_DIM),
+                                                .color(theme::text_dim()),
                                             );
                                             if ui
-                                                .add(egui::Button::new(egui::RichText::new(audio::SETUP_BUTTON).color(egui::Color32::WHITE)).fill(theme::ACCENT))
+                                                .add(egui::Button::new(egui::RichText::new(audio::SETUP_BUTTON).color(egui::Color32::WHITE)).fill(theme::accent()))
                                                 .clicked()
                                             {
                                                 self.audio_setup = Some(audio::Setup::start(false));
@@ -3724,11 +3853,11 @@ impl Studio {
                                             }
                                         }
                                         Some(true) => {
-                                            ui.label(egui::RichText::new("✔ Installed").color(theme::LIVE));
+                                            ui.label(egui::RichText::new("✔ Installed").color(theme::live()));
                                             ui.label(
                                                 egui::RichText::new("In ClassIn: microphone → \"MarkCam Microphone\". Switch back to your own microphone when MarkCam is closed.")
                                                     .small()
-                                                    .color(theme::TEXT_DIM),
+                                                    .color(theme::text_dim()),
                                             );
                                         }
                                     }
@@ -3766,7 +3895,7 @@ impl Studio {
                                 let mut hear = ctl.monitor.load(Ordering::Relaxed);
                                 let meter = |ui: &mut egui::Ui, level: f32| {
                                     let l = level.clamp(0.0, 1.0);
-                                    let color = if l > 0.95 { theme::ERROR } else if l > 0.7 { theme::WARN } else { theme::LIVE };
+                                    let color = if l > 0.95 { theme::error() } else if l > 0.7 { theme::warn() } else { theme::live() };
                                     ui.add(egui::ProgressBar::new(l).desired_width(ui.available_width()).desired_height(6.0).fill(color));
                                 };
                                 ui.horizontal(|ui| {
@@ -3812,7 +3941,7 @@ impl Studio {
                                          Noise is lowered, never muted, and quiet sound is never pumped up.",
                                     )
                                     .small()
-                                    .color(theme::TEXT_DIM),
+                                    .color(theme::text_dim()),
                                 );
                                 let test_status = audio::voice_test().lock().unwrap().status.clone();
                                 let mic_running = self.audio_engine.as_ref().is_some_and(|e| e.status.lock().unwrap().contains("your voice"));
@@ -3827,10 +3956,10 @@ impl Studio {
                                     }
                                 });
                                 if !test_status.is_empty() {
-                                    ui.label(egui::RichText::new(test_status).small().color(theme::ACCENT));
+                                    ui.label(egui::RichText::new(test_status).small().color(theme::accent()));
                                 }
                                 if let Some(e) = &self.audio_engine {
-                                    ui.label(egui::RichText::new(e.status.lock().unwrap().clone()).small().color(theme::TEXT_DIM));
+                                    ui.label(egui::RichText::new(e.status.lock().unwrap().clone()).small().color(theme::text_dim()));
                                 }
                                 if ui.small_button("Refresh devices").clicked() {
                                     self.mics = audio::microphones();
@@ -3845,11 +3974,17 @@ impl Studio {
                     Tab::Setup => {
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                             if ui
-                                .add_sized([ui.available_width(), 34.0], egui::Button::new(egui::RichText::new("♥  About MarkCam · Support the project").strong()).fill(theme::ACCENT_DIM))
+                                .add_sized([ui.available_width(), 34.0], egui::Button::new(egui::RichText::new("♥  About MarkCam · Support the project").strong()).fill(theme::accent_dim()))
                                 .clicked()
                             {
                                 self.about_open = true;
                             }
+                            theme::section(ui, "Look of MarkCam");
+                            theme::card(ui, |ui| {
+                                theme::picker(ui, &mut self.theme_id);
+                                ui.label(egui::RichText::new("Only this window changes. Your picture in ClassIn stays the same.").small().color(theme::text_dim()));
+                            });
+                            ui.add_space(6.0);
                             theme::section(ui, "Virtual camera");
                             theme::card(ui, |ui| {
                                 if self.vcam_state != vcam::InstallState::Missing {
@@ -3862,7 +3997,7 @@ impl Studio {
                                         }
                                         (true, None) => "Ready — pick \"MarkCam\" as the camera in ClassIn.".to_string(),
                                     };
-                                    ui.label(egui::RichText::new(line).color(theme::TEXT_DIM));
+                                    ui.label(egui::RichText::new(line).color(theme::text_dim()));
                                     ui.horizontal(|ui| {
                                         if vcam::needs_update(self.vcam_state, &fx.vcam)
                                             && ui.button(format!("{} (admin)", vcam::UPDATE_LABEL)).on_hover_text(vcam::UPDATE_HINT).clicked()
@@ -3886,7 +4021,7 @@ impl Studio {
                             theme::section(ui, "Performance & battery");
                             theme::card(ui, |ui| {
                                 let note = |ui: &mut egui::Ui, t: &str| {
-                                    ui.label(egui::RichText::new(t).small().color(theme::TEXT_DIM));
+                                    ui.label(egui::RichText::new(t).small().color(theme::text_dim()));
                                 };
                                 ui.label("Preview while MarkCam is behind another window");
                                 ui.horizontal_wrapped(|ui| {
@@ -3933,7 +4068,7 @@ impl Studio {
                             theme::section(ui, "Face tracking");
                             theme::card(ui, |ui| {
                                 if have_face_models && face_active {
-                                    ui.label(egui::RichText::new("● Active (a face mask is on)").color(theme::LIVE));
+                                    ui.label(egui::RichText::new("● Active (a face mask is on)").color(theme::live()));
                                 } else if have_face_models {
                                     ui.label("Ready — starts only while a face mask is on.");
                                 } else if let Some(s) = &dl_status {
@@ -3948,39 +4083,11 @@ impl Studio {
                             ui.add_space(6.0);
                             theme::section(ui, "Effect library");
                             theme::card(ui, |ui| {
-                                let mut mc = library::use_manycam();
-                                if !PUBLIC
-                                    && ui
-                                    .checkbox(&mut mc, "Also use effects and backgrounds from an installed ManyCam")
-                                    .on_hover_text("MarkCam has its own effects and backgrounds. Turn this on to also list ManyCam's (from its folders on this computer).")
-                                    .changed()
-                                {
-                                    library::set_use_manycam(mc);
-                                    do_refresh = true;
-                                    self.bg_files = None;
-                                }
-                                ui.label(egui::RichText::new(format!("{} effects in the library", self.lib.total())).small().color(theme::TEXT_DIM));
-                                let (locked, other) = self.lib.hidden();
-                                if locked + other > 0 {
-                                    let mut why = Vec::new();
-                                    if locked > 0 {
-                                        why.push(format!("{locked} are encrypted by ManyCam (they only work inside ManyCam)"));
-                                    }
-                                    if other > 0 {
-                                        why.push(format!("{other} use effect types not supported yet"));
-                                    }
-                                    ui.label(
-                                        egui::RichText::new(format!("Hidden: {}.", why.join("; ")))
-                                            .small()
-                                            .color(theme::TEXT_DIM),
-                                    );
-                                }
+                                ui.label(egui::RichText::new(format!("{} effects in the library", self.lib.total())).small().color(theme::text_dim()));
                                 ui.horizontal(|ui| {
                                     if ui.button("Rescan").clicked() {
                                         do_refresh = true;
-                                    }
-                                    if !PUBLIC && ui.button("Locate folder…").clicked() {
-                                        locate_folder = true;
+                                        self.bg_files = None;
                                     }
                                     if ui.button("Import file…").clicked() {
                                         do_import = true;
@@ -3996,11 +4103,11 @@ impl Studio {
         let tex_id = self.tex.as_ref().map(|t| t.id());
         let mirror = self.mirror;
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(theme::BG).inner_margin(egui::Margin::same(12.0)))
+            .frame(egui::Frame::none().fill(theme::bg()).inner_margin(egui::Margin::same(12.0)))
             .show(ctx, |ui| {
             let Some(tex_id) = tex_id else {
                 ui.centered_and_justified(|ui| {
-                    ui.label(egui::RichText::new("Waiting for the camera…").color(theme::TEXT_DIM).size(16.0))
+                    ui.label(egui::RichText::new("Waiting for the camera…").color(theme::text_dim()).size(16.0))
                 });
                 return;
             };
@@ -4080,7 +4187,7 @@ impl Studio {
                     let mid = egui::Rect::from_min_size(org + egui::vec2((N / 2) as f32 * cell, (N / 2) as f32 * cell), egui::vec2(cell, cell));
                     painter.rect_stroke(mid.expand(1.0), 0.0, egui::Stroke::new(2.0_f32, egui::Color32::BLACK));
                     painter.rect_stroke(mid, 0.0, egui::Stroke::new(1.5_f32, egui::Color32::WHITE));
-                    painter.rect_stroke(frame.expand(3.0), 6.0, egui::Stroke::new(1.5_f32, theme::ACCENT));
+                    painter.rect_stroke(frame.expand(3.0), 6.0, egui::Stroke::new(1.5_f32, theme::accent()));
                     let c = vbg::pick_color(&fx.cur_rgba, w as usize, h as usize, cx.clamp(0, w - 1) as usize, cy.clamp(0, h - 1) as usize);
                     let sw = egui::Rect::from_min_size(egui::pos2(frame.min.x - 3.0, frame.max.y + 6.0), egui::vec2(size + 6.0, 24.0));
                     painter.rect_filled(sw, 5.0, egui::Color32::from_rgb(c[0], c[1], c[2]));
@@ -4299,9 +4406,9 @@ impl Studio {
                 {
                     let painter = ui.painter_at(rect);
                     let hover = ui.input(|i| i.pointer.hover_pos());
-                    painter.add(egui::Shape::closed_line(h.outline.to_vec(), egui::Stroke::new(2.0_f32, theme::ACCENT)));
+                    painter.add(egui::Shape::closed_line(h.outline.to_vec(), egui::Stroke::new(2.0_f32, theme::accent())));
                     if let Some(b) = h.resize {
-                        painter.circle_filled(b, 7.0, theme::ACCENT);
+                        painter.circle_filled(b, 7.0, theme::accent());
                         painter.circle_stroke(b, 7.0, egui::Stroke::new(1.5_f32, egui::Color32::WHITE));
                     }
                     if let Some((mid, knob)) = h.rotate {
@@ -4309,9 +4416,9 @@ impl Studio {
                         if hot {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
-                        painter.line_segment([mid, knob], egui::Stroke::new(1.5_f32, theme::ACCENT));
-                        painter.circle_filled(knob, 9.0, if hot { theme::ACCENT } else { egui::Color32::from_rgb(40, 44, 52) });
-                        painter.circle_stroke(knob, 9.0, egui::Stroke::new(1.5_f32, theme::ACCENT));
+                        painter.line_segment([mid, knob], egui::Stroke::new(1.5_f32, theme::accent()));
+                        painter.circle_filled(knob, 9.0, if hot { theme::accent() } else { egui::Color32::from_rgb(40, 44, 52) });
+                        painter.circle_stroke(knob, 9.0, egui::Stroke::new(1.5_f32, theme::accent()));
                         painter.text(knob, egui::Align2::CENTER_CENTER, "↻", egui::FontId::proportional(13.0), egui::Color32::WHITE);
                     }
                     // Remove button, top right (Delete does the same).
@@ -4444,12 +4551,13 @@ impl Studio {
             }
             Some(CatAction::DeleteItem(item)) => {
                 // Take it off the picture first (a playing video keeps its file open).
-                if let Some(p) = item.r.file.clone() {
+                {
+                    let p = item.r.file.clone();
                     use settings::LayerSource as L;
                     let removed = {
                         let mut fx = fx_arc.lock().unwrap();
                         let n = fx.overlays.len();
-                        fx.overlays.retain(|o| !matches!(&o.source, Some(L::Image(x) | L::Video(x) | L::McvFile(x)) if *x == p));
+                        fx.overlays.retain(|o| !matches!(&o.source, Some(L::Image(x) | L::Video(x)) if *x == p));
                         fx.overlays.len() != n
                     };
                     if removed {
@@ -4502,14 +4610,8 @@ impl Studio {
                 self.download_dir = Some(dir);
             }
         }
-        if locate_folder {
-            if let Some(dir) = rfd::FileDialog::new().set_title("Select a folder with ManyCam .mcep packs").pick_folder() {
-                self.lib = library::Library::start(Some(dir));
-                self.category = None;
-            }
-        }
         if do_refresh {
-            self.lib = library::Library::start(None);
+            self.lib = library::Library::start();
             self.category = None;
         }
         // Own images / GIFs: from "+", or files dragged onto the window. They are copied
@@ -4536,40 +4638,27 @@ impl Studio {
                     Ok(item) => add_items.push(item),
                     Err(e) => self.load_err = Some(format!("could not import {}: {e}", path.display())),
                 }
-            } else if ext == "mcv" && !PUBLIC {
-                if let Some(item) = self.lib.add_imported(path) {
-                    add_items.push(item);
-                }
             } else {
                 self.load_err = Some(format!("unsupported file: {}", path.display()));
             }
         }
         if do_import {
             if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Effects", if PUBLIC { &["markcam"][..] } else { &["markcam", "mcv", "mcep"][..] })
-                .set_title(if PUBLIC { "Import a shared MarkCam effect (.markcam)" } else { "Import an effect (MarkCam .markcam, ManyCam .mcv / .mcep)" })
+                .add_filter("MarkCam effect", &["markcam"])
+                .set_title("Import a shared MarkCam effect (.markcam)")
                 .pick_file()
             {
-                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
-                if ext == "markcam" {
-                    match maker::import(&path).and_then(|img| self.lib.add_my_effect(&img).map_err(Into::into)) {
-                        Ok(item) => add_items.push(item),
-                        Err(e) => self.load_err = Some(format!("could not import {}: {e}", path.display())),
-                    }
-                } else if ext == "mcep" {
-                    // Index every pack in that folder alongside the defaults.
-                    self.lib = library::Library::start(path.parent().map(Path::to_path_buf));
-                    self.category = None;
-                } else if let Some(item) = self.lib.add_imported(path) {
-                    add_items.push(item);
+                match maker::import(&path).and_then(|img| self.lib.add_my_effect(&img).map_err(Into::into)) {
+                    Ok(item) => add_items.push(item),
+                    Err(e) => self.load_err = Some(format!("could not import {}: {e}", path.display())),
                 }
             }
         }
         // Decode new layers without holding the pipeline, then add them.
         let mut new_layers: Vec<Overlay> = Vec::new();
         for item in add_items {
-            // Videos play through Media Foundation, not the ManyCam/image loader.
-            if let Some(p) = item.r.file.as_deref().filter(|p| video::is_video_file(p)) {
+            // Videos play through Media Foundation, not the image loader.
+            if let Some(p) = Some(item.r.file.as_path()).filter(|p| video::is_video_file(p)) {
                 match overlay_from_video(p) {
                     Ok(ov) => {
                         self.load_err = None;
@@ -4805,7 +4894,7 @@ impl Studio {
                 ui.label(format!("Made by {AUTHOR}, a teacher, for teachers who teach online — free to use."));
                 ui.label(
                     egui::RichText::new("Built together with Claude, an AI assistant made by Anthropic.")
-                        .color(theme::TEXT_DIM),
+                        .color(theme::text_dim()),
                 );
                 ui.add_space(10.0);
                 theme::card(ui, |ui| {
@@ -4821,7 +4910,7 @@ impl Studio {
                         }
                     });
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("PayPal: {DONATE_EMAIL}")).color(theme::TEXT_DIM));
+                        ui.label(egui::RichText::new(format!("PayPal: {DONATE_EMAIL}")).color(theme::text_dim()));
                         if ui.small_button("Copy").on_hover_text("Copy the PayPal address").clicked() {
                             ui.ctx().copy_text(DONATE_EMAIL.into());
                         }
@@ -4857,7 +4946,7 @@ impl Studio {
                     line(ui, "Video links and downloads: yt-dlp (Unlicense) and FFmpeg (GPL). Only download videos you are allowed to use.");
                     line(ui, "Full license texts are in the \"licenses\" folder next to MarkCam.exe.");
                     ui.add_space(4.0);
-                    line(ui, "MarkCam is an independent project, not affiliated with or endorsed by Anthropic, ManyCam, VB-Audio, Microsoft or Google. Their names belong to their owners.");
+                    line(ui, "MarkCam is an independent project, not affiliated with or endorsed by Anthropic, VB-Audio, Microsoft or Google. Their names belong to their owners.");
                 });
             });
         if !open {
@@ -4928,12 +5017,12 @@ impl Studio {
             }
             ui.label(egui::RichText::new("Name banner").strong().size(16.0));
         });
-        ui.label(egui::RichText::new("Your name (or anything) at the bottom of the picture — slides in, shines, slides out. Key N or the 🏷 Name button shows / hides it.").small().color(theme::TEXT_DIM));
+        ui.label(egui::RichText::new("Your name (or anything) at the bottom of the picture — slides in, shines, slides out. Key N or the 🏷 Name button shows / hides it.").small().color(theme::text_dim()));
         ui.add_space(4.0);
         let shown = fx.banner.as_ref().is_some_and(|b| !b.is_leaving()) || self.banner_pending;
         let label = if shown { "⏹  Hide banner" } else { "▶  Show banner" };
         if ui
-            .add_sized([ui.available_width(), 40.0], egui::Button::new(egui::RichText::new(label).strong().size(16.0)).fill(if shown { theme::WARN.gamma_multiply(0.6) } else { theme::ACCENT_DIM }))
+            .add_sized([ui.available_width(), 40.0], egui::Button::new(egui::RichText::new(label).strong().size(16.0)).fill(if shown { theme::warn().gamma_multiply(0.6) } else { theme::accent_dim() }))
             .clicked()
         {
             self.toggle_banner(fx, ctx);
@@ -4953,7 +5042,7 @@ impl Studio {
                             pick = Some(i);
                         }
                         if !def.subtitle.is_empty() {
-                            ui.label(egui::RichText::new(&def.subtitle).small().color(theme::TEXT_DIM));
+                            ui.label(egui::RichText::new(&def.subtitle).small().color(theme::text_dim()));
                         }
                         if self.banners.len() > 1 {
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -5002,7 +5091,7 @@ impl Studio {
             theme::card(ui, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut d.title).hint_text("Your name, e.g. Teacher Mark").desired_width(f32::INFINITY).font(egui::FontId::proportional(17.0)));
                 ui.add(egui::TextEdit::singleline(&mut d.subtitle).hint_text("Second line (optional), e.g. English teacher · 英语老师").desired_width(f32::INFINITY));
-                ui.label(egui::RichText::new("Any text works, also Chinese. Leave the second line empty for a one-line banner.").small().color(theme::TEXT_DIM));
+                ui.label(egui::RichText::new("Any text works, also Chinese. Leave the second line empty for a one-line banner.").small().color(theme::text_dim()));
             });
             theme::section(ui, "Style");
             theme::card(ui, |ui| {
@@ -5022,9 +5111,9 @@ impl Studio {
                                 let r = egui::Rect::from_center_size(rect.center() - egui::vec2(0.0, 6.0), s * k);
                                 p.image(t.id(), r, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                             }
-                            p.text(rect.center_bottom() - egui::vec2(0.0, 8.0), egui::Align2::CENTER_CENTER, st.name(), egui::FontId::proportional(11.5), theme::TEXT);
+                            p.text(rect.center_bottom() - egui::vec2(0.0, 8.0), egui::Align2::CENTER_CENTER, st.name(), egui::FontId::proportional(11.5), theme::text());
                             if d.style == st {
-                                p.rect_stroke(rect, 8.0, egui::Stroke::new(2.5_f32, theme::ACCENT));
+                                p.rect_stroke(rect, 8.0, egui::Stroke::new(2.5_f32, theme::accent()));
                             }
                             if resp.clicked() {
                                 d.style = st;
@@ -5059,9 +5148,9 @@ impl Studio {
                         let Some(e) = maker::find_emoji(key) else { continue };
                         let (rect, resp) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::click());
                         if d.icon == key {
-                            ui.painter().rect_filled(rect, 6.0, theme::ACCENT_DIM);
+                            ui.painter().rect_filled(rect, 6.0, theme::accent_dim());
                         } else if resp.hovered() {
-                            ui.painter().rect_filled(rect, 6.0, theme::CARD_HOVER);
+                            ui.painter().rect_filled(rect, 6.0, theme::card_hover());
                         }
                         if let Some(img) = banner::icon_image(key, &self.fetch, ctx) {
                             let tex = self.banner_previews.entry(format!("icon:{key}")).or_insert_with(|| {
@@ -5092,7 +5181,7 @@ impl Studio {
                     }
                 });
             });
-            ui.label(egui::RichText::new("Fonts: Lilita One, Poppins (SIL OFL), Luckiest Guy (Apache 2.0).").small().color(theme::TEXT_DIM));
+            ui.label(egui::RichText::new("Fonts: Lilita One, Poppins (SIL OFL), Luckiest Guy (Apache 2.0).").small().color(theme::text_dim()));
             // Edited while on the picture: redraw it with the change (no new slide-in).
             if d != self.banners[i] {
                 self.banners[i] = d.clone();
@@ -5122,7 +5211,7 @@ fn transport_bar(ui: &mut egui::Ui, pb: &link::Playback, scrub: &mut Option<f64>
         let at_end = pb.duration.is_some_and(|d| pb.pos >= d - 1.0);
         let label = if pb.paused { "▶" } else { "⏸" };
         let play = ui
-            .add(egui::Button::new(egui::RichText::new(label).size(16.0).color(egui::Color32::WHITE)).fill(theme::ACCENT).min_size(egui::vec2(38.0, 28.0)))
+            .add(egui::Button::new(egui::RichText::new(label).size(16.0).color(egui::Color32::WHITE)).fill(theme::accent()).min_size(egui::vec2(38.0, 28.0)))
             .on_hover_text(if pb.paused { "Play (Space)" } else { "Pause (Space)" });
         let space = !ui.ctx().wants_keyboard_input() && ui.input(|i| i.key_pressed(egui::Key::Space));
         if play.clicked() || space {
@@ -5132,7 +5221,7 @@ fn transport_bar(ui: &mut egui::Ui, pb: &link::Playback, scrub: &mut Option<f64>
             link::set_paused(!pb.paused);
         }
         let Some(dur) = pb.duration.filter(|d| *d > 0.5) else {
-            ui.label(egui::RichText::new("● LIVE").color(theme::LIVE).strong());
+            ui.label(egui::RichText::new("● LIVE").color(theme::live()).strong());
             if pb.buffering {
                 spinner(ui);
             }
@@ -5157,7 +5246,7 @@ fn transport_bar(ui: &mut egui::Ui, pb: &link::Playback, scrub: &mut Option<f64>
             link::seek(v);
             *scrub = None;
         }
-        ui.label(egui::RichText::new(clock(dur)).monospace().color(theme::TEXT_DIM));
+        ui.label(egui::RichText::new(clock(dur)).monospace().color(theme::text_dim()));
         if pb.buffering && !pb.paused {
             spinner(ui);
         }
@@ -5510,83 +5599,6 @@ mod tests {
         link::set_paused(false);
         assert_eq!(next(&mut src, 10), 10);
         println!("resumed at {:.1}", link::playback().pos);
-    }
-
-    /// Visual check of face masks on a real photo: tracks the face in a ManyCam thumbnail
-    /// and warps masks onto it, saving PNGs (path in OVC_MASK_OUT). Needs the face models.
-    #[test]
-    #[ignore]
-    fn face_mask_visual() {
-        let out = std::path::PathBuf::from(std::env::var("OVC_MASK_OUT").expect("OVC_MASK_OUT"));
-        let models = find_models().expect("face models");
-        let tracker = ovc_ml::face::FaceTracker::load(
-            &models.join("version-RFB-320.onnx"),
-            &models.join("2d106det.onnx"),
-            ovc_ml::face::Lmk::Insight106,
-        )
-        .unwrap();
-        let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join(r"ManyCam\Effects\Video\Face Masks");
-        let mut thumb_zip = zip::ZipArchive::new(std::fs::File::open(dir.join("Kitty.mcv")).unwrap()).unwrap();
-        let mut bytes = Vec::new();
-        std::io::Read::read_to_end(&mut thumb_zip.by_name("images/thumbnail/large.jpg").unwrap(), &mut bytes).unwrap();
-        let photo = image::load_from_memory(&bytes).unwrap().to_rgba8();
-        let (w, h) = photo.dimensions();
-        let lms = tracker.landmarks68(photo.as_raw(), w, h).unwrap().expect("a face");
-        for name in ["Kitty", "Devil Mask", "Hellboy"] {
-            let Ok(e) = ovc_mcam::load_mcv_file(&dir.join(format!("{name}.mcv"))) else { continue };
-            let mut ov = overlay_from_effect(e);
-            let mut frame = photo.as_raw().clone();
-            if let Some(piv) = ov.face.clone() {
-                let fr = &ov.frames[0];
-                let dst: Vec<[f32; 2]> = lms.iter().map(|p| [p[0] * w as f32, p[1] * h as f32]).collect();
-                ovc_ml::warp::warp_mask_onto(&mut frame, w, h, &fr.rgba, fr.w, fr.h, &piv, &dst, 1.0);
-            } else {
-                ov.composite_face(&mut frame, w, h, &lms);
-            }
-            image::RgbaImage::from_raw(w, h, frame).unwrap().save(out.join(format!("mask-{name}.png"))).unwrap();
-        }
-    }
-
-    /// Face stickers land where they belong on a synthetic face (needs the user's ManyCam
-    /// effects, hence ignored by default).
-    #[test]
-    #[ignore]
-    fn face_stickers_placement() {
-        let (w, h) = (1280u32, 720u32);
-        // 68 landmarks: everything at the face center, eyes at y = 0.45, 0.12 w apart.
-        let mut lms = vec![[0.5f32, 0.5f32]; 68];
-        for p in &mut lms[36..42] {
-            *p = [0.44, 0.45];
-        }
-        for p in &mut lms[42..48] {
-            *p = [0.56, 0.45];
-        }
-        let dir = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join(r"ManyCam\Effects\Video");
-        for (file, expect) in [
-            (r"Hats & Hair\GGlalal.mcv", "above"),
-            (r"Eye Accessories\King Crown.mcv", "above"),
-            (r"Eye Accessories\Moustache.mcv", "below"),
-            (r"Eye Accessories\Summer Glasses.mcv", "at"),
-        ] {
-            let Ok(e) = ovc_mcam::load_mcv_file(&dir.join(file)) else { continue };
-            let mut ov = overlay_from_effect(e);
-            assert!(ov.anchor.is_some(), "{file} should be face-anchored");
-            let mut frame = vec![0u8; (w * h * 4) as usize];
-            ov.composite_face(&mut frame, w, h, &lms);
-            let r = ov.drawn.expect("drawn");
-            let cy = (r[1] + r[3]) / 2.0;
-            println!("{file:40} center y {cy:.3} (eyes 0.450), height {:.3}", r[3] - r[1]);
-            match expect {
-                "above" => assert!(cy < 0.40, "{file} center {cy}"),
-                "below" => assert!(cy > 0.47, "{file} center {cy}"),
-                // The glasses image has pineapples on top, so its center sits above the eyes;
-                // its lenses (at ~72% of the image height) land on the eye line.
-                _ => {
-                    let lens_y = r[1] + (r[3] - r[1]) * 0.72;
-                    assert!((lens_y - 0.45).abs() < 0.03, "{file} lenses at {lens_y}")
-                }
-            }
-        }
     }
 
     /// Per-frame cost of the CPU stages at 1080p (run with `--ignored --nocapture`).

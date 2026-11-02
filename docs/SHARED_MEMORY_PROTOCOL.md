@@ -1,8 +1,7 @@
 # OpenVCam shared-memory protocol (`OVC1`)
 
 A single named shared mapping transports frames from the engine (producer) to the native
-camera plugin (consumer). Unlike ManyCam's undocumented `manycam_video_source_*` mapping
-guarded by a global event-as-mutex, this is **versioned and lock-free** (a seqlock ring).
+camera plugin (consumer). It is **versioned and lock-free** (a seqlock ring).
 
 ## Naming
 
@@ -72,5 +71,5 @@ the ctrl region.
 ## Format negotiation
 
 `fourcc`/`width`/`height` are set by the producer after the plugin advertises supported media
-types (I420/NV12/YUY2 for webcam compatibility, matching what ManyCam exposed). Changing
+types (I420/NV12/YUY2 for webcam compatibility). Changing
 format re-initializes the mapping (new `session_id`) rather than mutating a live ring.

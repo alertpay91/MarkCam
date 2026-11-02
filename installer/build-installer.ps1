@@ -6,7 +6,7 @@
 # Bundled from this computer: the face / background models, ONNX Runtime and video tools
 # (%APPDATA%\MarkCam), the VB-CABLE driver pack, MarkCam's own effects and backgrounds
 # (rendered from assets\), and - unless -Public - the user's "My effects" (files over
-# -MaxEffectMB are left out) and library.json (categories). Nothing from ManyCam.
+# -MaxEffectMB are left out) and library.json (categories).
 param(
     [string]$Version = '1.0.0',
     [int]$MaxEffectMB = 150,
@@ -30,7 +30,7 @@ if (-not $NoBuild) {
     if ($nasm) { $env:Path += ";$($nasm.DirectoryName)" }
     if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) { throw 'NASM not found (needed for fast MJPEG decoding)' }
     Push-Location $root
-    # The public build hides the ManyCam options and keeps "VB-CABLE" in the microphone name.
+    # The public build keeps "VB-CABLE" in the microphone name and looks for updates.
     if ($Public) { $env:MARKCAM_PUBLIC = '1' } else { Remove-Item Env:MARKCAM_PUBLIC -ErrorAction SilentlyContinue }
     cargo build --release -p ovc-app -p ovc-dshow
     if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
@@ -72,8 +72,7 @@ foreach ($t in 'yt-dlp.exe', 'ffmpeg.exe') { Copy-Item (Need "$data\tools\$t") "
 Copy-Item (Need "$data\tools\vbcable\*") "$stage\drivers\vbcable\" -Recurse
 Need "$stage\drivers\vbcable\VBCABLE_Setup_x64.exe" | Out-Null
 
-# Effects library: MarkCam's own (no ManyCam files — ManyCam's can be turned on in Setup
-# where it is installed), plus this computer's "My effects" unless -Public.
+# Effects library: MarkCam's own, plus this computer's "My effects" unless -Public.
 Copy-Item "$root\assets\out\effects" "$stage\effects\MarkCam" -Recurse
 $skipped = @()
 if (-not $Public -and (Test-Path "$data\My Effects")) {

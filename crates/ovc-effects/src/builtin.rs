@@ -1,4 +1,4 @@
-//! Built-in effects mirroring the ManyCam feature set, implemented as GPU shaders.
+//! Built-in effects (color grade, blur, chroma key…), implemented as GPU shaders.
 
 use bytemuck::{Pod, Zeroable};
 

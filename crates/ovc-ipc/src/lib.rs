@@ -1,8 +1,8 @@
 //! Lock-free shared-memory ring buffer — the `OVC1` transport between the engine
 //! (producer) and the native camera plugin (consumer).
 //!
-//! See `docs/SHARED_MEMORY_PROTOCOL.md` for the wire layout. The design replaces
-//! ManyCam's single global event-used-as-a-mutex with a **seqlock** ring: the producer
+//! See `docs/SHARED_MEMORY_PROTOCOL.md` for the wire layout. Rather than a single global
+//! event used as a mutex, it is a **seqlock** ring: the producer
 //! never blocks, and a lagging consumer simply skips to the newest frame.
 
 pub mod protocol;

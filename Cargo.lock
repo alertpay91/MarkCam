@@ -1201,15 +1201,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "delaunator"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e1ee323c1275374f7e612d3724d12707079fb6a2117349fe144def656f5a880"
-dependencies = [
- "robust",
-]
-
-[[package]]
 name = "deranged"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3499,7 +3490,7 @@ checksum = "cf211e3776eea6aec988552fa118dd746d70e1b1e5e244058d1c98015f3e5872"
 
 [[package]]
 name = "ovc-app"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -3536,7 +3527,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-capture"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "libc",
@@ -3549,7 +3540,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-cli"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -3566,7 +3557,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-core"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "thiserror 2.0.21",
@@ -3575,7 +3566,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-dshow"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "ovc-ipc",
  "windows 0.58.0",
@@ -3584,7 +3575,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-effects"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3594,7 +3585,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-gpu"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3607,7 +3598,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-ipc"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -3619,22 +3610,20 @@ dependencies = [
 
 [[package]]
 name = "ovc-mcam"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "image",
  "image-webp",
  "serde",
  "serde_json",
- "zip",
 ]
 
 [[package]]
 name = "ovc-ml"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
- "delaunator",
  "image",
  "ort",
  "ovc-core",
@@ -3645,7 +3634,7 @@ dependencies = [
 
 [[package]]
 name = "ovc-vcam"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "anyhow",
  "libc",
@@ -4226,12 +4215,6 @@ dependencies = [
  "untrusted",
  "windows-sys 0.52.0",
 ]
-
-[[package]]
-name = "robust"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
 name = "rubato"

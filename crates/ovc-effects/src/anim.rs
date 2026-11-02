@@ -1,4 +1,4 @@
-//! Procedural animated overlays (ManyCam's "Fire", "Matrix"… re-created): drawn with code
+//! Procedural animated overlays ("Fire", "Matrix"…): drawn with code
 //! every frame, so they are smooth at any resolution and need no video files.
 //!
 //! Each kind keeps its own small state (a heat grid, rain columns, particles). Sizes are

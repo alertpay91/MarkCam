@@ -132,8 +132,8 @@ pub fn my_backgrounds_dir() -> PathBuf {
     crate::settings::app_dir().join("Backgrounds")
 }
 
-/// Picture/video files offered as backgrounds: the user's own, then ManyCam's (if
-/// installed), then any bundled with the installer. `(group, path)`.
+/// Picture/video files offered as backgrounds: the user's own, then the ones bundled with
+/// the installer. `(group, path)`.
 pub fn files() -> Vec<(&'static str, PathBuf)> {
     let mut out = Vec::new();
     let mut add = |group: &'static str, dir: PathBuf| {
@@ -151,12 +151,7 @@ pub fn files() -> Vec<(&'static str, PathBuf)> {
     }
     // Development builds: the generated set (installed builds have it next to the exe).
     add("MarkCam pictures", crate::settings::app_dir().join("PackBackgrounds"));
-    if crate::library::use_manycam() {
-        if let Some(d) = std::env::var_os("APPDATA") {
-            add("ManyCam", Path::new(&d).join("ManyCam").join("Backgrounds"));
-        }
-    }
-    // The installer ships ManyCam's set too: show each picture once.
+    // The same picture in two places (installed + development set): show it once.
     let mut seen = std::collections::HashSet::new();
     out.retain(|(_, p)| seen.insert(p.file_name().map(|n| n.to_ascii_lowercase())));
     out

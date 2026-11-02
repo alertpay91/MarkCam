@@ -154,7 +154,7 @@ fn matrix_generic(src: &[u8], dst: &mut [u8], m: &[[i32; 3]; 3], off: &[i32; 3])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────
-// Color filters (ManyCam's "Filters" category, re-created)
+// Color filters
 // ─────────────────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -287,7 +287,7 @@ impl Vignette {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────
-// Distortions (ManyCam's "Distortions" category, re-created)
+// Distortions
 // ─────────────────────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -588,7 +588,7 @@ impl WarpRenderer {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────
-// Looks (ManyCam's "Electricity" / "Red Contours" filters and friends, re-created):
+// Looks ("Electricity", "Red contours" and friends):
 // whole-picture styles built from the picture's edges and brightness.
 // ─────────────────────────────────────────────────────────────────────────────────────
 

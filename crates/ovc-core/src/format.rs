@@ -21,8 +21,8 @@ impl std::fmt::Debug for FourCc {
 
 /// Pixel formats we move through the pipeline and expose to consuming apps.
 ///
-/// The webcam-facing set (NV12/I420/YUY2) matches what the ManyCam filter advertised,
-/// for maximum app compatibility; RGBA/BGRA are used internally on the GPU.
+/// The webcam-facing set (NV12/I420/YUY2) is what webcams commonly offer, for maximum app
+/// compatibility; RGBA/BGRA are used internally on the GPU.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PixelFormat {
     /// 4:2:0, Y plane then interleaved UV. 12 bpp.

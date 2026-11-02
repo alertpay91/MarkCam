@@ -5,7 +5,6 @@
 
 pub mod face;
 pub mod seg;
-pub mod warp;
 
 /// Normalized face bounding box (0..1 in image space) plus detector confidence.
 #[derive(Debug, Clone, Copy)]

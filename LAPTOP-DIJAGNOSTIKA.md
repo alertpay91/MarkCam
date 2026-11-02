@@ -24,7 +24,7 @@ minimized 230 → 91, test pattern visible 516 → 110.
 ---
 ## Round 1 (done)
 
-Context: MarkCam is the user's own ManyCam replacement (Rust, egui; virtual camera
+Context: MarkCam is the user's own virtual camera app (Rust, egui; virtual camera
 "MarkCam" via a DirectShow filter; "MarkCam Microphone" via VB-CABLE). It was developed and
 measured only on a desktop (Ryzen 5 2600X, GTX 1070): with a 720p30 camera it uses ~2% of
 the whole CPU (≈ 25% of one core) and ~2% GPU. It is now installed on this laptop

@@ -98,5 +98,4 @@ Microsoft.ML.OnnxRuntime.DirectML 1.24.4; DirectML — NuGet Microsoft.AI.Direct
   upsample + composite are ideal shaders.
 - Laptop (Intel HD 620) timing of RVM Light is unknown.
 - Licensing: RVM is GPL-3.0; shipping it means the release must be GPL-3.0 (or download
-  the model separately). MODNet is Apache-2.0. The bundled ManyCam backgrounds are for the
-  owner's personal use only and must not be in a public release.
+  the model separately). MODNet is Apache-2.0.

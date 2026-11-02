@@ -50,7 +50,7 @@ MarkCam is free software under the **GNU GPL v3 or later** (see `LICENSE`).
 Third-party parts keep their own licenses: see `THIRD-PARTY-NOTICES.txt`.
 
 MarkCam was written by Marko Stevanović together with Claude, an AI assistant made by Anthropic.
-It is an independent project, not affiliated with or endorsed by Anthropic, ManyCam, VB-Audio,
+It is an independent project, not affiliated with or endorsed by Anthropic, VB-Audio,
 Microsoft, Google or YouTube.
 
 ## Support

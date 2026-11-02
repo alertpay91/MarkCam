@@ -1,14 +1,14 @@
 # Architecture
 
-## Goals (and how we beat ManyCam)
+## Goals
 
-| Area | ManyCam (observed) | OpenVCam |
-|------|--------------------|----------|
-| Effects compute | CPU-heavy (OpenCV/dlib on CPU), per-frame copies | GPU render graph (`wgpu`), zero-copy textures |
-| Face/ML | dlib 19.15 HOG + ERT landmarks, models baked into the DLL | ONNX models, downloaded via manifest, hot-swappable |
-| VCam transport | Undocumented named mapping `manycam_video_source_*`, single global **event used as a mutex**, 4-slot ring, bare `u32` counter | Documented `OVC1` protocol, **lock-free seqlock** ring, N slots, per-slot seq+timestamp |
-| Portability | Windows-only DirectShow | One `VirtualCamera` trait: DShow+MF / CMIO / v4l2loopback |
-| Architecture | Monolithic C++ | Rust workspace, trait-driven, each concern is its own crate |
+| Area | Approach |
+|------|----------|
+| Effects compute | GPU render graph (`wgpu`), zero-copy textures |
+| Face/ML | ONNX models, downloaded via manifest, hot-swappable |
+| VCam transport | Documented `OVC1` protocol, **lock-free seqlock** ring, N slots, per-slot seq+timestamp |
+| Portability | One `VirtualCamera` trait: DShow+MF / CMIO / v4l2loopback |
+| Architecture | Rust workspace, trait-driven, each concern is its own crate |
 
 ## The pipeline
 
@@ -33,7 +33,7 @@ single command encoder (`ovc-gpu::RenderGraph`) and submitted once.
 an optional set of input texture bindings (e.g. a segmentation mask from `ovc-ml`). Effects
 are registered by name so the UI and project files can reference them declaratively.
 
-Built-ins mirror the ManyCam feature set: color grade / LUT, chroma key, background
+Built-ins: color grade / LUT, chroma key, background
 blur/replace (fed by the segmentation mask), face landmarks overlay & masks, lower-thirds /
 text, picture-in-picture compositor, flip/rotate/crop/zoom.
 

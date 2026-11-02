@@ -1,21 +1,8 @@
-//! Importer for ManyCam's effect packs, reverse-engineered for interoperability so the
-//! effects a user already has can be used in OpenVCam.
-//!
-//! Container nesting (all plain ZIP):
-//! ```text
-//! Foo.mcep (zip)
-//!   effect_pack_info.json
-//!   Some Effect.mcv (zip)
-//!     effect.json         { name, author, type, category, subcategory }
-//!     properties.json     { position:[x,y], size:[w,h], canvas_aspect, animation_type, repeat, ... }
-//!     images/main/<asset> PNG | JPG | GIF   (the actual visual)
-//!     images/thumbnail/{small,medium,large}.jpg
-//! ```
-//! `type` is one of `object` / `fullscreen_object` (a positioned still image), `animation`
-//! (an animated GIF), or `face_modifications` / `face` (a mask anchored to 68 facial
-//! landmarks — see [`FaceMask`]). Positions/sizes are fractions of the ManyCam canvas.
+//! MarkCam's effect files: plain images and animations (PNG, APNG, JPG, GIF, WebP), with an
+//! optional `<name>.face.json` beside a picture that makes it a face sticker. Decodes them
+//! into frames, lists a folder of them and makes small thumbnails for the browser.
 
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context};
@@ -33,274 +20,48 @@ pub struct Frame {
 /// The broad category that decides how an effect is applied.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
-    /// A still image placed at `position`/`size` (sticker or full-screen border).
+    /// A still image placed on the picture (sticker or full-screen border).
     Object,
-    /// An animated GIF placed at `position`/`size`.
+    /// An animation placed on the picture.
     Animation,
-    /// A mask anchored to facial landmarks (needs face tracking to apply).
+    /// A face sticker: follows the face (needs face tracking to apply).
     FaceMask,
-    /// Recognised container but an unsupported/unknown `type`.
-    Other,
-    /// Not a plain ZIP: ManyCam ships some (store/premium) effects encrypted so they only
-    /// work inside ManyCam. They are listed so they can be counted, never decoded.
-    Locked,
-}
-
-/// 68(+)-point normalized mask anchors for face effects (indices follow the dlib/iBUG
-/// 68-landmark model). Present only for [`Kind::FaceMask`].
-#[derive(Debug, Clone, Default)]
-pub struct FaceMask {
-    /// `(x, y)` in [0,1] relative to the mask image, one per landmark pivot.
-    pub pivots: Vec<[f32; 2]>,
 }
 
 /// A fully decoded effect ready to composite.
 pub struct Effect {
     pub name: String,
-    pub author: String,
     pub kind: Kind,
-    /// Raw `type` string from `effect.json` (for diagnostics).
-    pub raw_type: String,
-    /// Top-left position as a fraction of the canvas.
+    /// A large ~16:9 picture: drawn over the whole frame (a border).
+    pub fullscreen: bool,
+    /// Face stickers: center offset and size in face units (see [`load_image_effect`]).
     pub position: [f32; 2],
-    /// Size as a fraction of the canvas.
     pub size: [f32; 2],
-    pub canvas_aspect: f32,
     pub repeat: bool,
     pub frames: Vec<Frame>,
-    pub face: Option<FaceMask>,
 }
 
-/// A lightweight reference to one effect (name/type only — no image decode), cheap enough to
-/// list a whole pack/folder for a browser UI. It points either at an entry inside a `.mcep`
-/// pack, or at a standalone `.mcv` file on disk (`file` set).
+/// A lightweight reference to one effect file (name/type only — no image decode), cheap
+/// enough to list a whole folder for a browser UI.
 #[derive(Debug, Clone)]
 pub struct EffectRef {
-    pub pack_path: PathBuf,
-    pub pack_name: String,
-    /// The `.mcv` entry name inside the pack (the key to [`load_effect`]).
-    pub mcv_name: String,
+    /// The category it is listed under (its folder).
+    pub category: String,
     pub display_name: String,
     pub kind: Kind,
-    /// If set, this is a standalone `.mcv` file (loaded via [`load_mcv_file`]).
-    pub file: Option<PathBuf>,
+    pub file: PathBuf,
 }
 
-#[derive(Deserialize, Default)]
-struct EffectJson {
-    name: Option<String>,
-    author: Option<String>,
-    #[serde(rename = "type")]
-    type_: Option<String>,
+/// Load the effect an [`EffectRef`] points at.
+pub fn load_effect_ref(r: &EffectRef) -> anyhow::Result<Effect> {
+    load_image_effect(&r.file)
 }
 
-#[derive(Deserialize, Default)]
-struct PropsJson {
-    position: Option<[f32; 2]>,
-    size: Option<[f32; 2]>,
-    canvas_aspect: Option<f32>,
-    repeat: Option<bool>,
-}
-
-fn kind_from_type(t: &str) -> Kind {
-    match t {
-        "object" | "fullscreen_object" => Kind::Object,
-        "animation" => Kind::Animation,
-        "face_modifications" | "face" => Kind::FaceMask,
-        _ => Kind::Other,
-    }
-}
-
-/// The default ManyCam effect-pack directory for the current user, if ManyCam is installed.
-pub fn default_pack_dir() -> Option<PathBuf> {
-    let appdata = std::env::var_os("APPDATA")?;
-    let p = Path::new(&appdata).join("ManyCam").join("Effects").join("Effect Packs");
-    p.is_dir().then_some(p)
-}
-
-/// The default ManyCam per-category effects directory (individual `.mcv` files, where
-/// effects downloaded through ManyCam land), if present.
-pub fn default_video_dir() -> Option<PathBuf> {
-    let appdata = std::env::var_os("APPDATA")?;
-    let p = Path::new(&appdata).join("ManyCam").join("Effects").join("Video");
-    p.is_dir().then_some(p)
-}
-
-/// Category subdirectories under a Video dir that actually contain `.mcv` effects.
-pub fn list_category_dirs(video_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(video_dir)
-        .with_context(|| format!("read dir {}", video_dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.is_dir()
-                && std::fs::read_dir(p).map(|rd| {
-                    rd.filter_map(|e| e.ok())
-                        .any(|e| e.path().extension().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("mcv")))
-                }).unwrap_or(false)
-        })
-        .collect();
-    v.sort();
-    Ok(v)
-}
-
-/// List every `*.mcep` pack in a directory.
-pub fn list_packs(dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
-    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
-        .with_context(|| format!("read dir {}", dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().and_then(|s| s.to_str()).is_some_and(|s| s.eq_ignore_ascii_case("mcep")))
-        .collect();
-    v.sort();
-    Ok(v)
-}
-
-fn read_entry_by_suffix<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>, suffix: &str) -> Option<Vec<u8>> {
-    let idx = (0..zip.len()).find(|&i| {
-        zip.by_index(i).ok().is_some_and(|f| f.name().to_ascii_lowercase().ends_with(suffix))
-    })?;
-    let mut f = zip.by_index(idx).ok()?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).ok()?;
-    Some(buf)
-}
-
-/// Names of the `.mcv` entries in a pack.
-fn mcv_names<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>) -> Vec<String> {
-    (0..zip.len())
-        .filter_map(|i| zip.by_index(i).ok().map(|f| f.name().to_string()))
-        .filter(|n| n.to_ascii_lowercase().ends_with(".mcv"))
-        .collect()
-}
-
-/// List the effects in one pack without decoding any imagery.
-pub fn list_effects_in_pack(pack_path: &Path) -> anyhow::Result<Vec<EffectRef>> {
-    let pack_name = pack_path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let file = std::fs::File::open(pack_path).with_context(|| format!("open {}", pack_path.display()))?;
-    let mut zip = zip::ZipArchive::new(file).with_context(|| format!("read pack {}", pack_path.display()))?;
-    let names = mcv_names(&mut zip);
-    let mut out = Vec::with_capacity(names.len());
-    for mcv_name in names {
-        // Read the inner .mcv and peek only at effect.json.
-        let bytes = match read_entry_by_name(&mut zip, &mcv_name) {
-            Some(b) => b,
-            None => continue,
-        };
-        let (display_name, kind) = peek_mcv(&bytes, mcv_name.trim_end_matches(".mcv"));
-        out.push(EffectRef {
-            pack_path: pack_path.to_path_buf(),
-            pack_name: pack_name.clone(),
-            mcv_name,
-            display_name,
-            kind,
-            file: None,
-        });
-    }
-    out.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
-    Ok(out)
-}
-
-/// Read only `effect.json` from `.mcv` bytes for a quick (name, kind) without decoding images.
-fn peek_mcv(bytes: &[u8], fallback_name: &str) -> (String, Kind) {
-    match zip::ZipArchive::new(Cursor::new(bytes)) {
-        Ok(mut inner) => {
-            let ej: EffectJson = read_entry_by_suffix(&mut inner, "effect.json")
-                .and_then(|b| serde_json::from_slice(&b).ok())
-                .unwrap_or_default();
-            let disp = ej.name.unwrap_or_else(|| fallback_name.to_string());
-            (disp, kind_from_type(ej.type_.as_deref().unwrap_or("")))
-        }
-        Err(_) => (fallback_name.to_string(), Kind::Other),
-    }
-}
-
-/// Like [`peek_mcv`] but straight from a file: only the zip directory and `effect.json` are
-/// read, not the (possibly multi-MB) imagery.
-fn peek_mcv_file(path: &Path, fallback_name: &str) -> (String, Kind) {
-    let mut magic = [0u8; 2];
-    let is_zip = std::fs::File::open(path).and_then(|mut f| f.read_exact(&mut magic)).is_ok() && &magic == b"PK";
-    if !is_zip {
-        return (fallback_name.to_string(), Kind::Locked);
-    }
-    let parsed = std::fs::File::open(path).ok().and_then(|f| zip::ZipArchive::new(std::io::BufReader::new(f)).ok());
-    match parsed {
-        Some(mut z) => {
-            let ej: EffectJson =
-                read_entry_by_suffix(&mut z, "effect.json").and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-            (ej.name.unwrap_or_else(|| fallback_name.to_string()), kind_from_type(ej.type_.as_deref().unwrap_or("")))
-        }
-        None => (fallback_name.to_string(), Kind::Other),
-    }
-}
-
-/// The effect's small thumbnail (`images/thumbnail/small.jpg`, else medium/large/main
-/// still) decoded to RGBA, for a browser grid. Cheap: reads only that entry.
+/// The effect's first frame, shrunk to thumbnail size, for a browser grid.
 pub fn load_thumbnail(r: &EffectRef) -> Option<(Vec<u8>, u32, u32)> {
-    fn pick<R: Read + std::io::Seek>(z: &mut zip::ZipArchive<R>) -> Option<Vec<u8>> {
-        ["thumbnail/small.", "thumbnail/medium.", "thumbnail/large."]
-            .iter()
-            .find_map(|t| {
-                let idx = (0..z.len()).find(|&i| z.by_index(i).ok().is_some_and(|f| f.name().to_ascii_lowercase().contains(t)))?;
-                let mut f = z.by_index(idx).ok()?;
-                let mut b = Vec::new();
-                f.read_to_end(&mut b).ok()?;
-                Some(b)
-            })
-    }
-    // Plain image / GIF: its (first) frame, shrunk to thumbnail size.
-    if let Some(p) = r.file.as_deref().filter(|p| is_image_file(p)) {
-        let img = image::open(p).ok()?.thumbnail(200, 150).to_rgba8();
-        let (w, h) = img.dimensions();
-        return Some((img.into_raw(), w, h));
-    }
-    let bytes = match &r.file {
-        Some(p) => {
-            let f = std::fs::File::open(p).ok()?;
-            pick(&mut zip::ZipArchive::new(std::io::BufReader::new(f)).ok()?)?
-        }
-        None => {
-            let f = std::fs::File::open(&r.pack_path).ok()?;
-            let mut pack = zip::ZipArchive::new(f).ok()?;
-            let mcv = read_entry_by_name(&mut pack, &r.mcv_name)?;
-            pick(&mut zip::ZipArchive::new(Cursor::new(mcv)).ok()?)?
-        }
-    };
-    let img = image::load_from_memory(&bytes).ok()?.to_rgba8();
+    let img = image::open(&r.file).ok()?.thumbnail(200, 150).to_rgba8();
     let (w, h) = img.dimensions();
     Some((img.into_raw(), w, h))
-}
-
-/// List the standalone `.mcv` effects in a directory (e.g. a ManyCam `Video/<Category>` folder).
-pub fn list_effects_in_dir(dir: &Path) -> anyhow::Result<Vec<EffectRef>> {
-    let pack_name = dir.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir).with_context(|| format!("read dir {}", dir.display()))? {
-        let path = entry?.path();
-        if path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("mcv")) != Some(true) {
-            continue;
-        }
-        let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        let (display_name, kind) = peek_mcv_file(&path, &stem);
-        out.push(EffectRef {
-            pack_path: PathBuf::new(),
-            pack_name: pack_name.clone(),
-            mcv_name: String::new(),
-            display_name,
-            kind,
-            file: Some(path),
-        });
-    }
-    out.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
-    Ok(out)
-}
-
-/// Load an effect referenced by an [`EffectRef`], from a pack entry, a standalone `.mcv`,
-/// or a plain image / GIF file.
-pub fn load_effect_ref(r: &EffectRef) -> anyhow::Result<Effect> {
-    match &r.file {
-        Some(p) if is_image_file(p) => load_image_effect(p),
-        Some(p) => load_mcv_file(p),
-        None => load_effect(&r.pack_path, &r.mcv_name),
-    }
 }
 
 /// File extensions usable as image effects: stills (PNG, JPG, WebP) and animations
@@ -384,21 +145,18 @@ pub fn load_image_effect(path: &Path) -> anyhow::Result<Effect> {
     let fullscreen = w >= 1000.0 && ((w / h) - 16.0 / 9.0).abs() < 0.05;
     let face = face_placement(path);
     let (kind, position, size) = match &face {
-        // A face sticker: anchored like ManyCam's `face` effects (center offset + size).
+        // A face sticker: center offset + size in face units.
         Some(f) => (Kind::FaceMask, f.center, f.size),
         None => (if frames.len() > 1 { Kind::Animation } else { Kind::Object }, [0.0, 0.0], [1.0, 1.0]),
     };
     Ok(Effect {
         name: path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
-        author: String::new(),
         kind,
-        raw_type: if fullscreen { "fullscreen_object" } else if face.is_some() { "face" } else { "object" }.into(),
+        fullscreen: fullscreen && face.is_none(),
         position,
         size,
-        canvas_aspect: 0.0,
         repeat: true,
         frames,
-        face: None,
     })
 }
 
@@ -412,9 +170,7 @@ pub fn list_images_in_dir(dir: &Path, category: &str) -> Vec<EffectRef> {
             // GIFs are always tagged animated; WebP/APNG are checked when loaded.
             let gif = p.extension().and_then(|s| s.to_str()).is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "gif" | "apng"));
             EffectRef {
-                pack_path: PathBuf::new(),
-                pack_name: category.to_string(),
-                mcv_name: String::new(),
+                category: category.to_string(),
                 display_name: p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
                 kind: if face_placement_file(&p).is_file() {
                     Kind::FaceMask
@@ -423,7 +179,7 @@ pub fn list_images_in_dir(dir: &Path, category: &str) -> Vec<EffectRef> {
                 } else {
                     Kind::Object
                 },
-                file: Some(p),
+                file: p,
             }
         })
         .collect();
@@ -463,81 +219,6 @@ pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
             }
         }
     }
-}
-
-fn read_entry_by_name<R: Read + std::io::Seek>(zip: &mut zip::ZipArchive<R>, name: &str) -> Option<Vec<u8>> {
-    let mut f = zip.by_name(name).ok()?;
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).ok()?;
-    Some(buf)
-}
-
-/// Fully decode one effect (by its `.mcv` entry name) from a pack: imagery + placement.
-pub fn load_effect(pack_path: &Path, mcv_name: &str) -> anyhow::Result<Effect> {
-    let file = std::fs::File::open(pack_path).with_context(|| format!("open {}", pack_path.display()))?;
-    let mut pack = zip::ZipArchive::new(file)?;
-    let mcv_bytes = read_entry_by_name(&mut pack, mcv_name).ok_or_else(|| anyhow!("{mcv_name} not in pack"))?;
-    load_mcv_bytes(&mcv_bytes, mcv_name)
-}
-
-/// Decode a standalone `.mcv` file from disk.
-pub fn load_mcv_file(path: &Path) -> anyhow::Result<Effect> {
-    let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-    load_mcv_bytes(&bytes, &name)
-}
-
-fn load_mcv_bytes(bytes: &[u8], mcv_name: &str) -> anyhow::Result<Effect> {
-    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).context("open .mcv zip")?;
-
-    let ej: EffectJson = read_entry_by_suffix(&mut zip, "effect.json")
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-    let props_raw = read_entry_by_suffix(&mut zip, "properties.json").unwrap_or_default();
-    let props: PropsJson = serde_json::from_slice(&props_raw).unwrap_or_default();
-
-    let raw_type = ej.type_.clone().unwrap_or_default();
-    let kind = kind_from_type(&raw_type);
-
-    // Pull the main asset (the first file under images/main/).
-    let main_idx = (0..zip.len()).find(|&i| {
-        zip.by_index(i)
-            .ok()
-            .is_some_and(|f| f.is_file() && f.name().to_ascii_lowercase().contains("images/main/"))
-    });
-    let (asset_name, asset_bytes) = match main_idx {
-        Some(i) => {
-            let mut f = zip.by_index(i)?;
-            let name = f.name().to_string();
-            let mut buf = Vec::new();
-            f.read_to_end(&mut buf)?;
-            (name, buf)
-        }
-        None => return Err(anyhow!("effect '{mcv_name}' has no images/main asset")),
-    };
-
-    let is_gif = asset_name.to_ascii_lowercase().ends_with(".gif");
-    let frames = if is_gif { decode_gif(&asset_bytes)? } else { vec![decode_still(&asset_bytes)?] };
-
-    // Parse face pivots for mask effects (optional / best-effort).
-    let face = if kind == Kind::FaceMask {
-        Some(parse_face_mask(&props_raw))
-    } else {
-        None
-    };
-
-    Ok(Effect {
-        name: ej.name.unwrap_or_else(|| mcv_name.trim_end_matches(".mcv").to_string()),
-        author: ej.author.unwrap_or_default(),
-        kind,
-        raw_type,
-        position: props.position.unwrap_or([0.0, 0.0]),
-        size: props.size.unwrap_or([1.0, 1.0]),
-        canvas_aspect: props.canvas_aspect.unwrap_or(0.0),
-        repeat: props.repeat.unwrap_or(true),
-        frames,
-        face,
-    })
 }
 
 fn decode_still(bytes: &[u8]) -> anyhow::Result<Frame> {
@@ -581,26 +262,6 @@ fn decode_gif(bytes: &[u8]) -> anyhow::Result<Vec<Frame>> {
         return Err(anyhow!("gif had no frames"));
     }
     Ok(out)
-}
-
-fn parse_face_mask(props_raw: &[u8]) -> FaceMask {
-    let v: serde_json::Value = serde_json::from_slice(props_raw).unwrap_or(serde_json::Value::Null);
-    let pivots = v
-        .get("face_mask_data")
-        .and_then(|d| d.get("mask_data"))
-        .and_then(|d| d.get("mask_pivots"))
-        .and_then(|p| p.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|p| {
-                    let x = p.get("x")?.as_f64()? as f32;
-                    let y = p.get("y")?.as_f64()? as f32;
-                    Some([x, y])
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    FaceMask { pivots }
 }
 
 #[cfg(test)]

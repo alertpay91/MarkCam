@@ -1,8 +1,7 @@
 # MarkCam's own effects and backgrounds
 
 Everything MarkCam ships is drawn in this repository as SVG and rendered at build time;
-no third-party images. (ManyCam's effects can still be used where ManyCam is installed:
-Setup → "Also use effects and backgrounds from an installed ManyCam", off by default.)
+no third-party images.
 
 ## Sources
 

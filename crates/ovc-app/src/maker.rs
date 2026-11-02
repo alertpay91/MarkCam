@@ -1099,13 +1099,13 @@ impl Maker {
                 }
             });
         });
-        ui.label(egui::RichText::new("Build it from pieces, then drag the selected piece on the picture to place it (scroll = size). It follows your face.").small().color(theme::TEXT_DIM));
+        ui.label(egui::RichText::new("Build it from pieces, then drag the selected piece on the picture to place it (scroll = size). It follows your face.").small().color(theme::text_dim()));
 
         // ── Pieces ──
         theme::section(ui, "Pieces");
         theme::card(ui, |ui| {
             if self.project.parts.is_empty() {
-                ui.label(egui::RichText::new("No pieces yet — add an emoji, an image / GIF or a photo below.").color(theme::TEXT_DIM));
+                ui.label(egui::RichText::new("No pieces yet — add an emoji, an image / GIF or a photo below.").color(theme::text_dim()));
             }
             let mut action: Option<(usize, i32)> = None;
             for i in 0..self.project.parts.len() {
@@ -1257,7 +1257,7 @@ impl Maker {
 
         ui.add_space(8.0);
         if !self.status.is_empty() {
-            ui.label(egui::RichText::new(&self.status).color(theme::WARN));
+            ui.label(egui::RichText::new(&self.status).color(theme::warn()));
         }
         if self.waiting || self.cutting.is_some() {
             ui.horizontal(|ui| {
@@ -1266,7 +1266,7 @@ impl Maker {
             });
         }
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(egui::RichText::new("💾 Save to My effects").strong()).fill(theme::ACCENT_DIM)).clicked() {
+            if ui.add(egui::Button::new(egui::RichText::new("💾 Save to My effects").strong()).fill(theme::accent_dim())).clicked() {
                 *save = true;
             }
             if ui.button("📤 Share…").on_hover_text("Save as one .markcam file to send to colleagues").clicked() {
@@ -1290,18 +1290,18 @@ impl Maker {
                     let (rect, resp) = ui.allocate_exact_size(egui::vec2(48.0, 48.0), egui::Sense::click());
                     if ui.is_rect_visible(rect) {
                         if resp.hovered() {
-                            ui.painter().rect_filled(rect, 6.0, crate::theme::CARD_HOVER);
+                            ui.painter().rect_filled(rect, 6.0, crate::theme::card_hover());
                         }
                         match self.thumb(ctx, e) {
                             Some(t) => {
                                 egui::Image::new(egui::load::SizedTexture::new(t.id(), egui::vec2(40.0, 40.0))).paint_at(ui, rect.shrink(4.0));
                             }
                             None => {
-                                ui.painter().circle_filled(rect.center(), 6.0, crate::theme::TEXT_DIM.gamma_multiply(0.4));
+                                ui.painter().circle_filled(rect.center(), 6.0, crate::theme::text_dim().gamma_multiply(0.4));
                             }
                         }
                         if e.noto.is_some() {
-                            ui.painter().circle_filled(rect.right_top() + egui::vec2(-6.0, 6.0), 3.5, crate::theme::LIVE);
+                            ui.painter().circle_filled(rect.right_top() + egui::vec2(-6.0, 6.0), 3.5, crate::theme::live());
                         }
                     }
                     if resp.on_hover_text(format!("{}{}", e.name, if e.noto.is_some() { " (animated version too)" } else { "" })).clicked() {
@@ -1310,7 +1310,7 @@ impl Maker {
                 }
             });
         });
-        ui.label(egui::RichText::new("● = also animated. Emoji art: Microsoft Fluent (MIT), Google Noto (CC BY 4.0).").small().color(crate::theme::TEXT_DIM));
+        ui.label(egui::RichText::new("● = also animated. Emoji art: Microsoft Fluent (MIT), Google Noto (CC BY 4.0).").small().color(crate::theme::text_dim()));
         if let Some(e) = picked {
             let animated = e.noto.is_some() && (self.animated_only || e.three.is_none());
             self.add_part(Source::Emoji { key: e.key.clone(), animated }, e.name.clone());

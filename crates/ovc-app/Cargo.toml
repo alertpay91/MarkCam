@@ -31,7 +31,7 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.140"
 # The main window's HWND (to hide MarkCam from its own screen capture). Already in the tree via eframe.
 raw-window-handle = "0.6"
-# Unpacking the ffmpeg download (and reading .mcv thumbnails in tests).
+# Unpacking the ffmpeg download and shared .markcam effects.
 zip = { version = "2.2.0", default-features = false, features = ["deflate"] }
 # Effect Maker output (animated PNG) and name banners (vector drawing + fonts); all three
 # are already in the tree (image / egui / resvg-free tiny-skia).

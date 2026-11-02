@@ -31,7 +31,7 @@ Art:
 - Everything else (hair, beards, backgrounds, borders, classroom bubbles) is MarkCam's own.
 
 MarkCam is an independent project. It is not affiliated with or endorsed by Anthropic,
-ManyCam, VB-Audio, Microsoft, Google or YouTube; their names and marks belong to their owners.
+VB-Audio, Microsoft, Google or YouTube; their names and marks belong to their owners.
 
 Video links and downloads use yt-dlp. You are responsible for only playing or downloading
 videos you have the right to use, and for following the rules of the site they come from.

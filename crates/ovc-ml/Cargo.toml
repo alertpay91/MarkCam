@@ -10,8 +10,6 @@ ovc-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-# Delaunay triangulation of the landmark mesh for piecewise-affine mask warping.
-delaunator = "1.0.2"
 # Pure-Rust ONNX inference (no native DLL; builds on MinGW and Linux). Runs the face
 # detector + landmark models the user chose, where ONNX Runtime (`ort`) cannot build.
 tract-onnx = "0.21.13"

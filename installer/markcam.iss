@@ -82,8 +82,7 @@ Filename: "{app}\MarkCam.exe"; Parameters: "--setup-audio ""{app}\drivers\vbcabl
 Filename: "{app}\MarkCam.exe"; Description: "Start MarkCam now"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [InstallDelete]
-; Earlier versions shipped ManyCam's effects and backgrounds: remove them on update
-; (ManyCam's own folders are used instead when the user turns that on in Setup).
+; Folders earlier versions used: remove them on update.
 Type: filesandordirs; Name: "{app}\effects\Effect Packs"
 Type: filesandordirs; Name: "{app}\effects\Video"
 Type: filesandordirs; Name: "{app}\backgrounds"
