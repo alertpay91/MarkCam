@@ -27,6 +27,7 @@ fn open_folder(dir: &Path) {
 mod banner;
 mod boost;
 mod maker;
+mod ipcam;
 mod link;
 mod screen;
 mod tools;
@@ -62,6 +63,8 @@ enum Spec {
     Media(PathBuf),
     /// A web link (YouTube, Twitch… live or not), with sound, at most this many lines.
     Link(String, u32),
+    /// An IP camera or a phone's camera app, by its stream address.
+    IpCam(String),
 }
 
 /// What the capture thread reports back about the currently open source.
@@ -139,6 +142,7 @@ fn build_source(spec: &Spec) -> anyhow::Result<Box<dyn CaptureSource>> {
         Spec::Media(path) if tools::ffmpeg().is_file() => Ok(Box::new(link::LinkSource::open_file(path)?)),
         Spec::Media(path) => Ok(Box::new(video::MediaSource::open(path)?)),
         Spec::Link(url, q) => Ok(Box::new(link::LinkSource::open_url(url, *q)?)),
+        Spec::IpCam(url) => Ok(Box::new(ipcam::IpCamSource::open(url)?)),
     }
 }
 
@@ -943,6 +947,15 @@ impl Drop for FaceWorker {
     }
 }
 
+/// What is typed in the "IP camera or phone" dialog.
+#[derive(Clone, Default)]
+struct IpCamForm {
+    addr: String,
+    user: String,
+    pass: String,
+    focused: bool,
+}
+
 /// Source changes requested from the top bar (applied after the panels are drawn).
 enum SourceAction {
     FullScreen,
@@ -950,6 +963,7 @@ enum SourceAction {
     LastArea,
     PickVideo,
     LinkDialog,
+    IpCamDialog,
     BackToCamera,
 }
 
@@ -1596,6 +1610,12 @@ struct Studio {
     link_dialog: Option<String>,
     /// A link waiting for yt-dlp / ffmpeg to finish downloading.
     pending_link: Option<String>,
+    /// The "IP camera / phone" dialog while open.
+    ipcam_dialog: Option<IpCamForm>,
+    /// An IP camera waiting for ffmpeg to be fetched.
+    pending_ipcam: Option<String>,
+    /// IP cameras / phones used before (full stream addresses), newest first.
+    ip_cameras: Vec<String>,
     last_link: String,
     /// Videos and links played lately (see `Settings::recent_media`).
     recent_media: Vec<String>,
@@ -1713,6 +1733,9 @@ impl Studio {
             tools_fetch: None,
             link_dialog: None,
             pending_link: None,
+            ipcam_dialog: None,
+            pending_ipcam: None,
+            ip_cameras: Vec::new(),
             last_link: String::new(),
             recent_media: Vec::new(),
             login_start_set: false,
@@ -1799,6 +1822,14 @@ impl Studio {
             if let Ok(u) = std::env::var("OVC_TEST_LINK") {
                 s.current = Spec::Link(u, 360);
             }
+            // OVC_TEST_IPCAM=<url> tests an IP camera; OVC_TEST_IPCAM_DIALOG=1 opens its dialog.
+            if let Ok(u) = std::env::var("OVC_TEST_IPCAM") {
+                s.ip_cameras = vec![u.clone()];
+                s.current = Spec::IpCam(u);
+            }
+            if std::env::var_os("OVC_TEST_IPCAM_DIALOG").is_some() {
+                s.ipcam_dialog = Some(IpCamForm::default());
+            }
             s.cap.set(s.current.clone());
         }
         // Explicit override for testing: OVC_CAMERA=<index>.
@@ -1855,6 +1886,7 @@ impl Studio {
         self.audio_ctl.voice_strength.store(c.voice_strength.clamp(1, 5), Ordering::Relaxed);
         self.last_link = c.last_link.clone();
         self.recent_media = c.recent_media.clone();
+        self.ip_cameras = c.ip_cameras.clone();
         // Linux: ClassIn (Chromium) lists the MarkCam camera only if MarkCam already runs when
         // ClassIn starts (v4l2loopback announces a camera once a picture is sent). Starting at
         // login, minimized, makes that the normal case. On once; the user can turn it off.
@@ -1911,6 +1943,7 @@ impl Studio {
         let spec = match (c.source.as_str(), c.screen_area, &c.media_path) {
             ("screen", Some(a), _) => Some(Spec::Screen(a)),
             ("media", _, Some(p)) if p.is_file() => Some(Spec::Media(p.clone())),
+            ("ipcam", _, _) if !c.ip_cameras.is_empty() && tools::ffmpeg().is_file() => Some(Spec::IpCam(c.ip_cameras[0].clone())),
             _ => cam.map(|idx| self.open_camera(idx)),
         };
         if let Some(spec) = spec {
@@ -1935,6 +1968,11 @@ impl Studio {
             Spec::Link(u, _) => Some(format!("link:{u}")),
             _ => None,
         };
+        if let Spec::IpCam(u) = &spec {
+            self.ip_cameras.retain(|x| !ipcam::same_camera(x, u));
+            self.ip_cameras.insert(0, u.clone());
+            self.ip_cameras.truncate(8);
+        }
         if let Some(r) = recent {
             self.recent_media.retain(|x| *x != r);
             self.recent_media.insert(0, r);
@@ -2087,11 +2125,97 @@ impl Studio {
         }
     }
 
+    /// "IP camera or phone": type the stream address (and a user name / password when the
+    /// camera asks), or pick one used before.
+    fn show_ipcam_dialog(&mut self, ctx: &egui::Context) {
+        let Some(form) = self.ipcam_dialog.as_mut() else { return };
+        let (mut connect, mut close) = (false, false);
+        let mut pick: Option<String> = None;
+        let mut forget: Option<usize> = None;
+        egui::Window::new("IP camera or phone")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                if !self.ip_cameras.is_empty() {
+                    ui.label(egui::RichText::new("USED BEFORE").small().color(theme::text_dim()));
+                    for (i, u) in self.ip_cameras.iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            if ui.button("▶  Connect").clicked() {
+                                pick = Some(u.clone());
+                            }
+                            ui.label(ipcam::display(u));
+                            if ui.small_button("🗑").on_hover_text("Remove from the list").clicked() {
+                                forget = Some(i);
+                            }
+                        });
+                    }
+                    ui.separator();
+                }
+                ui.label("Camera address");
+                let te = ui.add(
+                    egui::TextEdit::singleline(&mut form.addr)
+                        .hint_text("192.168.1.23:8080   or   rtsp://192.168.1.50:554/stream")
+                        .desired_width(420.0),
+                );
+                if !form.focused {
+                    te.request_focus();
+                    form.focused = true;
+                }
+                if te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    connect = true;
+                }
+                ui.collapsing("User name and password (only if the camera asks)", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut form.user).hint_text("User name").desired_width(200.0));
+                        ui.add(egui::TextEdit::singleline(&mut form.pass).hint_text("Password").password(true).desired_width(200.0));
+                    });
+                });
+                ui.add_space(4.0);
+                let dim = |t: &str| egui::RichText::new(t.to_string()).small().color(theme::text_dim());
+                ui.label(dim("Phone: install a free camera app (for example \"IP Webcam\" on Android), start it, and type the address it shows."));
+                ui.label(dim("Network camera: its RTSP address is in the camera's manual or its own app."));
+                ui.label(dim("The camera and this computer must be on the same Wi-Fi / network."));
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.add(egui::Button::new(egui::RichText::new("▶  Connect").color(egui::Color32::WHITE)).fill(theme::accent())).clicked() {
+                        connect = true;
+                    }
+                    if ui.button("Cancel").clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        close = true;
+                    }
+                });
+            });
+        if let Some(i) = forget {
+            self.ip_cameras.remove(i);
+        }
+        if connect {
+            let f = self.ipcam_dialog.clone().unwrap_or_default();
+            if f.addr.trim().is_empty() {
+                self.load_err = Some("type the camera's address first".into());
+                return;
+            }
+            pick = Some(ipcam::normalize(&f.addr, &f.user, &f.pass));
+        }
+        if let Some(url) = pick {
+            self.ipcam_dialog = None;
+            self.load_err = None;
+            if tools::ffmpeg().is_file() {
+                self.switch_to(Spec::IpCam(url));
+            } else {
+                self.pending_ipcam = Some(url);
+                self.tools_fetch = Some(tools::Fetch::start());
+            }
+        } else if close {
+            self.ipcam_dialog = None;
+        }
+    }
+
     /// Esc steps back, one step per press, ending on the Effects home: close About, deselect
     /// the selected effect, clear the search / leave a category, then any other tab →
     /// Effects. Dialogs (link, category name) and a focused text field handle Esc themselves.
     fn escape_ladder(&mut self, ctx: &egui::Context) {
-        if self.link_dialog.is_some() || self.cat_dialog.is_some() || ctx.wants_keyboard_input() {
+        if self.link_dialog.is_some() || self.ipcam_dialog.is_some() || self.cat_dialog.is_some() || ctx.wants_keyboard_input() {
             return;
         }
         if !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -2187,6 +2311,7 @@ impl Studio {
             Spec::Screen(_) => "screen",
             Spec::Media(_) => "media",
             Spec::Link(..) => "link",
+            Spec::IpCam(_) => "ipcam",
             Spec::Test => "test",
         };
         let p = &fx.cg.params;
@@ -2229,6 +2354,7 @@ impl Studio {
             voice_strength: self.audio_ctl.voice_strength.load(Ordering::Relaxed),
             last_link: self.last_link.clone(),
             recent_media: self.recent_media.clone(),
+            ip_cameras: self.ip_cameras.clone(),
             login_start_set: self.login_start_set,
             link_quality: self.link_quality,
             vcam_on: fx.vcam.on,
@@ -2564,9 +2690,12 @@ impl Studio {
                             p.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
                         ),
                         Spec::Link(u, q) => format!("Link {q}p: {}", short_link(u)),
+                        Spec::IpCam(u) => format!("IP camera: {}", ipcam::display(u)),
                     };
                     egui::ComboBox::from_id_salt("source")
                         .width(if tight { 150.0 } else if compact { 190.0 } else { 230.0 })
+                        // Tall enough to show every section without scrolling.
+                        .height(640.0)
                         .selected_text(format!("📷  {cur_name}"))
                         .show_ui(ui, |ui| {
                             ui.label(egui::RichText::new("CAMERAS").small().color(theme::text_dim()));
@@ -2575,6 +2704,20 @@ impl Studio {
                                 if ui.selectable_label(on, &c.name).clicked() {
                                     pending = Some(self.open_camera(c.index));
                                 }
+                            }
+                            // IP cameras / phones used before sit with the cameras.
+                            for u in &self.ip_cameras {
+                                let on = matches!(&self.current, Spec::IpCam(c) if c == u);
+                                if ui.selectable_label(on, format!("IP camera: {}", ipcam::display(u))).clicked() {
+                                    pending = Some(Spec::IpCam(u.clone()));
+                                }
+                            }
+                            if ui
+                                .selectable_label(false, "+ Add IP camera or phone…")
+                                .on_hover_text("A network camera, or your phone's camera through a camera app, over Wi-Fi")
+                                .clicked()
+                            {
+                                source_action = Some(SourceAction::IpCamDialog);
                             }
                             ui.separator();
                             ui.label(egui::RichText::new("SCREEN").small().color(theme::text_dim()));
@@ -2781,7 +2924,11 @@ impl Studio {
                     // The new source is still starting (a link takes a few seconds to resolve).
                     if status.is_none() && err.is_none() && !matches!(self.current, Spec::Test) {
                         spinner(ui);
-                        let what = if matches!(self.current, Spec::Link(..)) { "Opening the link…" } else { "Opening…" };
+                        let what = match self.current {
+                            Spec::Link(..) => "Opening the link…",
+                            Spec::IpCam(_) => "Connecting to the camera…",
+                            _ => "Opening…",
+                        };
                         ui.label(egui::RichText::new(what).small().color(theme::accent()));
                     }
                     if fx.camera_idle {
@@ -2792,6 +2939,10 @@ impl Studio {
                     }
                     ui.label(dim(format!("Preview {:.0} fps", self.fps)));
                     ui.label(dim(fx.gpu.adapter_info.to_string()));
+                    if let (Spec::IpCam(_), Some(st), true) = (&self.current, ipcam::status(), status.is_some()) {
+                        spinner(ui);
+                        ui.label(egui::RichText::new(format!("IP camera: {st}")).small().color(theme::accent()));
+                    }
                     let problem = err.clone().or_else(|| self.load_err.clone()).or_else(|| fx.vcam.err.clone());
                     if let Some(e) = problem {
                         ui.label(egui::RichText::new(format!("⚠ {e}")).small().color(theme::error()));
@@ -3653,7 +3804,7 @@ impl Studio {
                     Tab::Media => {
                         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                             let pb = link::playback();
-                            let not_camera = matches!(self.current, Spec::Link(..) | Spec::Media(_) | Spec::Screen(_));
+                            let not_camera = matches!(self.current, Spec::Link(..) | Spec::Media(_) | Spec::Screen(_) | Spec::IpCam(_));
                             theme::section(ui, "Play as the picture");
                             theme::card(ui, |ui| {
                                 ui.label(egui::RichText::new("Instead of your camera, the students see:").small().color(theme::text_dim()));
@@ -3686,6 +3837,13 @@ impl Studio {
                                     if ui.small_button(format!("Last area again ({}×{})", a.w, a.h)).clicked() {
                                         source_action = Some(SourceAction::LastArea);
                                     }
+                                }
+                                if ui
+                                    .add_sized([ui.available_width(), 34.0], egui::Button::new("📷  IP camera / phone…"))
+                                    .on_hover_text("A network camera, or your phone's camera through a camera app, over Wi-Fi")
+                                    .clicked()
+                                {
+                                    source_action = Some(SourceAction::IpCamDialog);
                                 }
                                 if not_camera {
                                     ui.add_space(4.0);
@@ -4462,6 +4620,7 @@ impl Studio {
                 }
             }
             Some(SourceAction::LinkDialog) => self.link_dialog = Some(self.last_link.clone()),
+            Some(SourceAction::IpCamDialog) => self.ipcam_dialog = Some(IpCamForm::default()),
             Some(SourceAction::BackToCamera) => {
                 if let Some(idx) = self.last_camera.or(self.cameras.first().map(|c| c.index)) {
                     let spec = self.open_camera(idx);
@@ -4471,6 +4630,7 @@ impl Studio {
             _ => {}
         }
         self.show_link_dialog(ctx);
+        self.show_ipcam_dialog(ctx);
         // Helper programs finished downloading: play the waiting link.
         if self.tools_fetch.as_ref().is_some_and(|f| !f.active.load(Ordering::SeqCst)) {
             let f = self.tools_fetch.take();
@@ -4478,9 +4638,13 @@ impl Studio {
                 if let Some(url) = self.pending_link.take() {
                     self.switch_to(Spec::Link(url, self.link_quality));
                 }
+                if let Some(url) = self.pending_ipcam.take() {
+                    self.switch_to(Spec::IpCam(url));
+                }
             } else if let Some(f) = f {
                 self.load_err = Some(f.status.lock().unwrap().clone());
                 self.pending_link = None;
+                self.pending_ipcam = None;
             }
         }
         // MarkCam Microphone setup finished: look at the devices again.

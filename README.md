@@ -16,6 +16,8 @@ made by a teacher, for teachers. Windows 10 / 11 and Linux (Linux Mint 22, Ubunt
 - **Virtual background** with AI (no green screen needed) or a color key.
 - **Play videos from links** (YouTube…) into the class with sound, through the
   *MarkCam Microphone*. Share part of your screen. Freeze the picture.
+- **IP cameras and phones** as the picture: an RTSP / HTTP network camera, or your
+  phone's camera through a free camera app, over Wi-Fi (Media → IP camera / phone).
 - **Studio voice:** AI noise suppression for your microphone, like Krisp — *Light* (RNNoise)
   takes out fans, air conditioning and hum; *Best* (DeepFilterNet) also keyboard clicks and other
   sudden noises. Plus rumble filter, even loudness and no clipping. Only your voice is cleaned:

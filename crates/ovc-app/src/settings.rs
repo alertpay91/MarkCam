@@ -16,7 +16,7 @@ pub struct Settings {
     pub res: (u32, u32),
     pub fps: u32,
     pub mirror: bool,
-    /// What is on the picture: "camera", "screen", "media" or "test".
+    /// What is on the picture: "camera", "screen", "media", "link", "ipcam" or "test".
     pub source: String,
     /// The last screen area picked (physical pixels).
     pub screen_area: Option<crate::screen::Area>,
@@ -68,6 +68,8 @@ pub struct Settings {
     pub last_link: String,
     /// Videos and links played lately, newest first: "file:<path>" / "link:<url>".
     pub recent_media: Vec<String>,
+    /// IP cameras / phones used before (stream addresses), newest first.
+    pub ip_cameras: Vec<String>,
     /// Linux: "start when I log in" was turned on once by default (see apply_settings).
     pub login_start_set: bool,
     /// Link quality (max lines).
@@ -153,6 +155,7 @@ impl Default for Settings {
             voice_strength: crate::voice::DEFAULT_STRENGTH,
             last_link: String::new(),
             recent_media: Vec::new(),
+            ip_cameras: Vec::new(),
             login_start_set: false,
             link_quality: 360,
             vcam_on: true,
